@@ -173,18 +173,17 @@ Chrome happily carries a ~490KB tool this way. See
 
 ### Claude.ai (web / desktop GUI)
 
-Yes — the web UI wants a **ZIP**. Not a loose folder, not a single `SKILL.md`.
+Yes — the web UI wants a **ZIP**. Easiest path: grab the release asset (no clone).
 
-1. Build the zip (from this repo):
+1. Download
+   [`servicenow-sow-bookmarklet.zip`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/releases/download/v1.0.0/servicenow-sow-bookmarklet.zip)
+   from the [v1.0.0 release](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/releases/tag/v1.0.0).
+2. In [claude.ai](https://claude.ai): **Customize → Skills → Upload skill**
+   (wording may say Settings → Capabilities / Features depending on the UI).
+3. Upload the zip, then **toggle the skill ON** — upload alone doesn’t enable it.
+4. Needs a paid plan with **code execution** enabled for custom skills.
 
-```bash
-chmod +x scripts/pack-for-claude.sh
-./scripts/pack-for-claude.sh
-# → dist/servicenow-sow-bookmarklet.zip
-```
-
-   Or by hand: zip the **folder** so the archive looks like this (folder at the
-   root, not bare files):
+The zip is folder-wrapped on purpose:
 
 ```
 servicenow-sow-bookmarklet.zip
@@ -195,23 +194,17 @@ servicenow-sow-bookmarklet.zip
     └── examples/
 ```
 
-   Wrong (Claude won’t find the skill):
+Don’t re-zip bare files at the root — Claude won’t find `SKILL.md`.
 
+To rebuild locally:
+
+```bash
+./scripts/pack-for-claude.sh
+# → dist/servicenow-sow-bookmarklet.zip
 ```
-servicenow-sow-bookmarklet.zip
-├── SKILL.md          ← files dumped at zip root
-└── references/
-```
 
-2. In [claude.ai](https://claude.ai): **Customize → Skills → Upload skill**
-   (wording may say Settings → Capabilities / Features depending on the UI).
-3. Pick `servicenow-sow-bookmarklet.zip`.
-4. **Toggle the skill ON** after upload — upload alone doesn’t enable it.
-5. Needs a paid plan with **code execution** enabled for custom skills.
-
-The folder name must match the skill `name` in `SKILL.md`
-(`servicenow-sow-bookmarklet`). Demos and the README banner are left out of the
-zip on purpose — Claude only needs the skill + references + examples.
+Demos and the README banner are left out of the zip — Claude only needs the
+skill + references + examples.
 
 ### Claude Code / Cursor (filesystem)
 
