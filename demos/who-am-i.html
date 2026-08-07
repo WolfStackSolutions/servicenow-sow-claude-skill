@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOW Who Am I - Install</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+        --page:      oklch(14% 0.018 268);
+        --surface-0: oklch(19% 0.022 268);
+        --surface-1: oklch(22% 0.026 268);
+        --surface-2: oklch(26% 0.032 268);
+        --border:       oklch(100% 0 0 / 0.10);
+        --border-faint: oklch(100% 0 0 / 0.06);
+        --text:  oklch(93% 0.008 286);
+        --dim:   oklch(70% 0.012 250);
+        --faint: oklch(55% 0.018 255);
+        --accent:      oklch(68% 0.15 277);
+        --accent-soft: oklch(68% 0.15 277 / 0.10);
+        --accent-bord: oklch(68% 0.15 277 / 0.45);
+        --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+        --body: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+        --sp-chip: 4px; --sp-tight: 8px; --sp-row: 12px;
+        --sp-inset: 16px; --sp-section: 24px; --sp-page: 32px;
+    }
+    html { background: var(--page); }
+    body {
+        background: var(--page); color: var(--text); font-family: var(--body);
+        min-height: 100vh; display: flex; align-items: flex-start;
+        justify-content: center; padding: var(--sp-page) var(--sp-inset);
+        font-size: 13px; line-height: 1.5;
+    }
+    .panel {
+        width: 100%; max-width: 720px;
+        background: var(--surface-0); border: 1px solid var(--border);
+        box-shadow: 0 12px 40px oklch(0% 0 0 / 0.5);
+    }
+    .panel-hd {
+        display: flex; align-items: center; gap: 10px;
+        padding: var(--sp-row) 14px;
+        border-bottom: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        background: var(--surface-1);
+    }
+    .panel-hd .title { font-weight: 700; font-size: 13px; }
+    .chip {
+        font-family: var(--mono); font-size: 10px; font-weight: 700;
+        color: var(--accent); background: var(--accent-soft);
+        border: 1px solid var(--accent-bord); padding: 2px 6px;
+    }
+    .install {
+        display: flex; align-items: center; gap: var(--sp-section);
+        padding: var(--sp-inset) 14px; border-bottom: 1px solid var(--border);
+    }
+    .install-copy { flex: 1; min-width: 0; }
+    .install-copy h2 { font-size: 13px; font-weight: 700; margin-bottom: var(--sp-chip); }
+    .install-copy p { color: var(--dim); font-size: 12px; max-width: 420px; }
+    .install-copy kbd {
+        font-family: var(--mono); font-size: 11px; color: var(--text);
+        background: var(--surface-2); border: 1px solid var(--border);
+        padding: 1px var(--sp-chip); white-space: nowrap;
+    }
+    .drag-btn {
+        display: inline-flex; align-items: center; gap: var(--sp-tight);
+        font-family: var(--body); font-size: 13px; font-weight: 600;
+        color: var(--accent); background: var(--accent-soft);
+        border: 1px solid var(--accent-bord);
+        padding: 10px 18px; text-decoration: none; cursor: grab;
+    }
+    .drag-btn:hover { border-color: var(--accent); }
+    .drag-hint { font-size: 11px; color: var(--faint); margin-top: var(--sp-tight); }
+    .copy-btn {
+        font-family: var(--mono); font-size: 11px; color: var(--dim);
+        background: transparent; border: 1px solid var(--border);
+        padding: 4px 10px; cursor: pointer; margin-top: var(--sp-tight);
+    }
+    .modules { list-style: none; }
+    .mod-row {
+        display: grid; grid-template-columns: 64px 1fr;
+        gap: var(--sp-inset); align-items: baseline;
+        padding: var(--sp-row) 14px;
+        border-top: 1px solid var(--border-faint);
+    }
+    .mod-key { font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--accent); }
+    .mod-name { font-size: 13px; font-weight: 700; }
+    .mod-desc { font-size: 12px; color: var(--dim); margin-top: 2px; }
+    .panel-ft {
+        padding: var(--sp-tight) 14px;
+        border-top: 1px solid var(--border); background: var(--surface-1);
+        font-family: var(--mono); font-size: 11px; color: var(--dim);
+    }
+    @media (max-width: 640px) {
+        .install { flex-direction: column; align-items: stretch; }
+    }
+</style>
+</head>
+<body>
+<main class="panel">
+    <header class="panel-hd">
+        <span class="title">SOW Who Am I</span>
+        <span class="chip">demo</span>
+    </header>
+
+    <section class="install">
+        <div class="install-copy">
+            <h2>Install</h2>
+            <p>
+                Drag the button to your bookmarks bar, then click it while
+                logged into Service Operations Workspace.
+                Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> if the
+                bookmarks bar is hidden.
+            </p>
+            <button class="copy-btn" id="copy-btn">Copy bookmarklet code</button>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--sp-tight);flex-shrink:0;">
+            <a class="drag-btn" id="install-link" href="javascript:void(0)">Who Am I</a>
+            <span class="drag-hint">drag to your bookmarks bar</span>
+        </div>
+    </section>
+
+    <ol class="modules">
+        <li class="mod-row">
+            <span class="mod-key">auth</span>
+            <div>
+                <div class="mod-name">CSRF token grab</div>
+                <div class="mod-desc">Reads g_ck / NOW.csrf_token / meta X-UserToken and sends X-UserToken.</div>
+            </div>
+        </li>
+        <li class="mod-row">
+            <span class="mod-key">user</span>
+            <div>
+                <div class="mod-name">Current user API</div>
+                <div class="mod-desc">Calls /api/now/ui/user/current_user then loads sys_user with dv() helpers.</div>
+            </div>
+        </li>
+        <li class="mod-row">
+            <span class="mod-key">ui</span>
+            <div>
+                <div class="mod-name">Draggable panel + toast</div>
+                <div class="mod-desc">Re-entry guard, namespace, skill design tokens, self-dismissing toast.</div>
+            </div>
+        </li>
+    </ol>
+
+    <footer class="panel-ft">skill demo · open on your SOW instance to run</footer>
+</main>
+
+<script>
+(function() {
+    var toolCode = function() {
+        'use strict';
+
+        var existing = document.getElementById('sow-whoami-panel');
+        if (existing) {
+            existing.style.display = existing.style.display === 'none' ? 'block' : 'none';
+            return;
+        }
+
+        if (!window._sowWhoAmI) window._sowWhoAmI = {};
+        var tk = window._sowWhoAmI;
+
+        var BG = '#131620', S1 = '#181c28', BORD = 'rgba(255,255,255,0.1)';
+        var T = '#e8e8f0', DIM = '#9aa0ab', FAINT = '#5a6270';
+        var ACC = '#6C6FFF', OK = '#10b981', DANGER = '#ef4444';
+        var MONO = "'JetBrains Mono','SF Mono',Consolas,monospace";
+        var BODY = "-apple-system,system-ui,'Segoe UI',Roboto,sans-serif";
+        var Z = 2147483549;
+
+        function getToken() {
+            if (typeof g_ck !== 'undefined' && g_ck) return g_ck;
+            if (window.g_ck) return window.g_ck;
+            if (window.NOW && window.NOW.csrf_token) return window.NOW.csrf_token;
+            if (window.NOW && window.NOW.g_ck) return window.NOW.g_ck;
+            try { if (window.top.g_ck) return window.top.g_ck; } catch (e) {}
+            try {
+                var meta = document.querySelector('meta[name="X-UserToken"]');
+                if (meta) return meta.getAttribute('content') || '';
+            } catch (e2) {}
+            return '';
+        }
+
+        function dv(f) {
+            if (f == null) return '';
+            if (typeof f === 'object' && f.display_value !== undefined)
+                return f.display_value || '';
+            var s = String(f);
+            return (s === 'undefined' || s === 'null') ? '' : s;
+        }
+
+        function toast(message, color, durationMs) {
+            var el = document.createElement('div');
+            el.style.cssText = [
+                'position:fixed', 'bottom:14px', 'left:50%',
+                'transform:translateX(-50%)', 'z-index:9999999',
+                'background:rgba(13,13,21,0.94)',
+                'border:1.5px solid ' + (color || ACC),
+                'font-family:' + MONO, 'font-size:12px',
+                'color:' + (color || ACC),
+                'padding:8px 16px',
+                'box-shadow:0 4px 16px rgba(0,0,0,0.4)',
+                'pointer-events:none', 'transition:opacity 0.3s',
+                'max-width:500px', 'word-break:break-all'
+            ].join(';');
+            el.textContent = message;
+            document.body.appendChild(el);
+            var d = durationMs || 2500;
+            setTimeout(function() { el.style.opacity = '0'; }, d);
+            setTimeout(function() { try { el.remove(); } catch (e) {} }, d + 400);
+        }
+
+        function snGet(table, query, fields, limit) {
+            var params = {
+                sysparm_query: query,
+                sysparm_limit: String(limit || 10),
+                sysparm_display_value: 'all'
+            };
+            if (fields && fields.length) params.sysparm_fields = fields.join(',');
+            var headers = { Accept: 'application/json' };
+            var token = getToken();
+            if (token) headers['X-UserToken'] = token;
+            return fetch(
+                location.origin + '/api/now/table/' + table + '?' + new URLSearchParams(params),
+                { credentials: 'include', headers: headers }
+            ).then(function(r) {
+                if (r.status === 429) throw new Error('Rate limited (429)');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            }).then(function(d) { return d.result || []; });
+        }
+
+        var panel = document.createElement('div');
+        panel.id = 'sow-whoami-panel';
+        panel.style.cssText = [
+            'position:fixed', 'right:16px', 'bottom:16px', 'z-index:' + Z,
+            'width:360px', 'max-width:calc(100vw - 32px)',
+            'background:' + BG, 'color:' + T,
+            'border:1px solid ' + BORD,
+            'box-shadow:0 12px 40px rgba(0,0,0,0.5)',
+            'font-family:' + BODY, 'font-size:13px'
+        ].join(';');
+
+        var header = document.createElement('div');
+        header.style.cssText = [
+            'display:flex', 'align-items:center', 'gap:10px',
+            'padding:12px 14px',
+            'border-bottom:1px solid ' + BORD,
+            'border-left:3px solid ' + ACC,
+            'background:' + S1, 'user-select:none', 'cursor:move'
+        ].join(';');
+        header.innerHTML =
+            '<span style="font-weight:700;font-size:13px;">Who Am I</span>' +
+            '<span style="flex:1;"></span>' +
+            '<span id="sow-whoami-close" style="cursor:pointer;color:' + FAINT + ';padding:2px 4px;">&#10005;</span>';
+        panel.appendChild(header);
+
+        var body = document.createElement('div');
+        body.id = 'sow-whoami-body';
+        body.style.cssText = 'padding:14px;color:' + DIM + ';';
+        body.textContent = 'Loading session…';
+        panel.appendChild(body);
+        document.body.appendChild(panel);
+
+        document.getElementById('sow-whoami-close').addEventListener('click', function() {
+            panel.style.display = 'none';
+        });
+
+        (function() {
+            var sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+            header.addEventListener('pointerdown', function(e) {
+                if (e.target.id === 'sow-whoami-close') return;
+                dragging = true;
+                sx = e.clientX; sy = e.clientY;
+                var r = panel.getBoundingClientRect();
+                ox = r.left; oy = r.top;
+                panel.style.transform = 'none';
+                panel.style.left = ox + 'px';
+                panel.style.top = oy + 'px';
+                panel.style.right = 'auto';
+                panel.style.bottom = 'auto';
+                header.setPointerCapture(e.pointerId);
+            });
+            header.addEventListener('pointermove', function(e) {
+                if (!dragging) return;
+                panel.style.left = (ox + e.clientX - sx) + 'px';
+                panel.style.top = (oy + e.clientY - sy) + 'px';
+            });
+            header.addEventListener('pointerup', function() { dragging = false; });
+        })();
+
+        var token = getToken();
+        if (!token) {
+            body.textContent = 'No CSRF token found. Open this on a logged-in SOW page.';
+            toast('No g_ck / X-UserToken', DANGER, 3500);
+            return;
+        }
+
+        fetch(location.origin + '/api/now/ui/user/current_user', {
+            headers: { Accept: 'application/json', 'X-UserToken': token },
+            credentials: 'include'
+        })
+        .then(function(r) {
+            if (!r.ok) throw new Error('current_user HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(d) {
+            var mySysId = d.result && d.result.sys_id;
+            if (!mySysId) throw new Error('No sys_id in current_user response');
+            tk.sysId = mySysId;
+            return snGet('sys_user', 'sys_id=' + mySysId,
+                ['sys_id', 'name', 'user_name', 'email', 'title'], 1);
+        })
+        .then(function(rows) {
+            var u = rows[0] || {};
+            var name = dv(u.name) || 'Unknown';
+            var userName = dv(u.user_name) || '—';
+            var email = dv(u.email) || '—';
+            var title = dv(u.title) || '—';
+            var tokenPreview = token.slice(0, 8) + '…' + token.slice(-4);
+
+            body.innerHTML = '';
+            var rowsHtml = [
+                ['Name', name],
+                ['User name', userName],
+                ['Email', email],
+                ['Title', title],
+                ['sys_id', tk.sysId],
+                ['Token', tokenPreview]
+            ];
+            rowsHtml.forEach(function(pair) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);';
+                var k = document.createElement('div');
+                k.style.cssText = 'width:88px;flex-shrink:0;color:' + FAINT + ';font-family:' + MONO + ';font-size:11px;';
+                k.textContent = pair[0];
+                var v = document.createElement('div');
+                v.style.cssText = 'flex:1;word-break:break-all;color:' + T + ';';
+                v.textContent = pair[1];
+                row.appendChild(k);
+                row.appendChild(v);
+                body.appendChild(row);
+            });
+            toast('Signed in as ' + name, OK);
+        })
+        .catch(function(err) {
+            body.textContent = String(err.message || err);
+            toast(String(err.message || err), DANGER, 4000);
+        });
+    };
+
+    var code = toolCode.toString();
+    var body = code.slice(code.indexOf('{') + 1, code.lastIndexOf('}'));
+    var href = 'javascript:void((function(){' + encodeURIComponent(body) + '})())';
+    document.getElementById('install-link').href = href;
+
+    document.getElementById('copy-btn').addEventListener('click', function() {
+        var fullCode = 'javascript:void((function(){' + encodeURIComponent(body) + '})())';
+        function done() {
+            document.getElementById('copy-btn').textContent = 'Copied';
+            setTimeout(function() {
+                document.getElementById('copy-btn').textContent = 'Copy bookmarklet code';
+            }, 2000);
+        }
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(fullCode).then(done).catch(function() {
+                var ta = document.createElement('textarea');
+                ta.value = fullCode;
+                ta.style.cssText = 'position:fixed;left:-9999px;';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+                done();
+            });
+        } else {
+            var ta = document.createElement('textarea');
+            ta.value = fullCode;
+            ta.style.cssText = 'position:fixed;left:-9999px;';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+            done();
+        }
+    });
+})();
+</script>
+</body>
+</html>
