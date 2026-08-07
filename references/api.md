@@ -323,7 +323,7 @@ Both `order_now` and PATCH return a JSON error body worth surfacing. Throwing on
 status alone hides the reason:
 
 ```javascript
-.then(function(r) {
+function parseResponse(r) {
     return r.text().then(function(text) {
         var json = null;
         try { json = JSON.parse(text); } catch (e) {}
@@ -335,12 +335,16 @@ status alone hides the reason:
             } else {
                 msg = text.slice(0, 200);
             }
-            throw Object.assign(new Error('HTTP ' + r.status + (msg ? ': ' + msg : '')),
+            throw Object.assign(
+                new Error('HTTP ' + r.status + (msg ? ': ' + msg : '')),
                 { status: r.status });
         }
         return json;
     });
-})
+}
+
+// Usage
+fetch(url, opts).then(parseResponse).then(function(d) { /* ... */ });
 ```
 
 Give bulk write tools a timeout too, so one hung request cannot stall a queue:

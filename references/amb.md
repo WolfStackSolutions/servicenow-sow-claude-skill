@@ -6,50 +6,105 @@ tap into the same bus or work with its effects.
 
 ## How AMB Works in SOW
 
-AMB runs over long-polling or WebSocket (depending on instance config) at:
+AMB runs over long-polling or WebSocket (depending on instance config) at
+`/amb/handshake`, `/amb/connect`, and `/amb/subscribe`.
 
-```
-/amb/connect
-/amb/handshake
-/amb/subscribe
+You do not need to speak that protocol. SOW already has a connected client on
+the page, and it exposes a record-watcher helper that handles channel naming for
+you.
+
+## Subscribing to Record Watchers
+
+The client is `window.g_ambClient` — not `window.amb`, and there is no
+`getClient()` step. Do not hand-build `/rw/default/...` channel paths; ask for a
+channel by table and encoded query:
+
+```javascript
+function ambClient() {
+    try {
+        return window.g_ambClient ||
+            (window.top && window.top !== window && window.top.g_ambClient) || null;
+    } catch (e) {
+        return window.g_ambClient || null;
+    }
+}
+
+function ambConnected(c) {
+    try {
+        return c && typeof c.getConnectionState === 'function'
+            ? /up|connect|open/i.test(String(c.getConnectionState()))
+            : !!c;
+    } catch (e) { return false; }
+}
+
+var ambSubs = [];
+
+function subscribeAmb(tables, filter, onPush) {
+    unsubscribeAmb();
+    var c = ambClient();
+    if (!c || typeof c.getRecordWatcherChannel !== 'function' || !ambConnected(c)) {
+        return false;                       // fall back to polling
+    }
+    try {
+        tables.forEach(function(table) {
+            var ch = c.getRecordWatcherChannel(table, filter);
+            ambSubs.push(ch.subscribe(function() { onPush(table); }));
+        });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function unsubscribeAmb() {
+    ambSubs.forEach(function(s) {
+        try { s.unsubscribe ? s.unsubscribe() : s(); } catch (e) {}
+    });
+    ambSubs = [];
+}
 ```
 
-The client library lives on `window.amb` or as a CometD instance. SOW subscribes
-to channels for notifications, record changes, and chat/presence updates.
+The filter is an ordinary encoded query, e.g. `'assigned_toIN' + sysIds.join(',')`.
+
+Three things to plan for:
+
+- **The client may not be ready** when your bookmarklet runs. Check
+  `getConnectionState()` and retry on an interval (around 20s) rather than
+  assuming a single attempt is definitive.
+- **Treat a push as a trigger, not as data.** The message does not carry a
+  trustworthy diff. Use it to run the delta poll you already have.
+- **Always keep the polling lane.** If AMB never connects, or drops silently, the
+  poller is what keeps the tool working. See `polling-scheduler.md`.
 
 ## Intercepting AMB-Driven Notifications
 
-Rather than subscribing to AMB channels directly (which requires knowing the
-exact channel names, which vary by instance), the practical approach is to
-intercept the effects of AMB messages -- the UI events they trigger.
-
-### Notification Interception
-
-When AMB delivers a notification, SOW dispatches a custom event to insert it
-into the UI. Intercept this dispatch:
+When AMB delivers a notification, SOW dispatches a custom event to insert it into
+the UI. The event is a generic CustomEvent, so match on **`detail.type`** — there
+is no event *named* `SIMPLE_EVENT#NOW_NOTIFICATION_PANEL_APPEND`, and checking
+`event.type` never fires:
 
 ```javascript
 var origDispatch = EventTarget.prototype.dispatchEvent;
 var pendingMessages = [];
 
-EventTarget.prototype.dispatchEvent = function(event) {
-    if (event && event.type === 'SIMPLE_EVENT#NOW_NOTIFICATION_PANEL_APPEND') {
+EventTarget.prototype.dispatchEvent = function(e) {
+    if (e && e.detail && e.detail.type &&
+        e.detail.type.indexOf('NOTIFICATIONS_UPDATED') >= 0) {
         try {
-            var payload = event.detail;
-            if (payload && payload.notifications) {
-                payload.notifications.forEach(function(n) {
+            var p = e.detail.payload;
+            if (p && p.notifications && p.notifications.length) {
+                p.notifications.forEach(function(n) {
                     var msg = (n.message || '')
                         .replace(/<[^>]+>/g, ' ')
                         .replace(/\s+/g, ' ')
                         .trim();
                     if (msg) {
                         pendingMessages.push(msg);
-                        // Do something with the notification message
                         onNotification(msg, n);
                     }
                 });
             }
-        } catch (e) {}
+        } catch (ex) {}
     }
     return origDispatch.apply(this, arguments);
 };
@@ -59,6 +114,10 @@ function restoreDispatch() {
     EventTarget.prototype.dispatchEvent = origDispatch;
 }
 ```
+
+This gives you the message text but does not stop the banner appearing. To
+suppress the focus-stealing alert as well, pair it with the `now-alert` DOM
+interception in `injection.md`.
 
 ### Record Change Detection via Polling
 
@@ -188,51 +247,52 @@ function deltaQuery(table, baseQuery, fields, limit) {
 This means subsequent polls only return records that changed since the last
 poll, dramatically reducing response size and API cost.
 
-## Direct AMB Subscription (Advanced)
+## Run Both Lanes
 
-If you need real-time push (sub-second latency) and the instance exposes the
-AMB client, you can subscribe to channels directly. This is instance-dependent
-and less portable than polling.
+Polling and AMB are not alternatives to choose between. Production tools run both,
+because each covers the other's weakness:
+
+| Factor | Delta Polling | AMB Record Watchers |
+|--------|--------------|---------------------|
+| Latency | 5-30 seconds (your interval) | Sub-second |
+| Availability | Works on any instance | Needs `g_ambClient` connected |
+| API cost | Counted against rate limit | No Table API cost |
+| Failure mode | Slow but correct | Can drop silently |
+| Data quality | Full record, diffable | Trigger only, no trustworthy diff |
+
+The combination:
+
+- **AMB push** arrives, you debounce it (~800ms) and immediately run a delta
+  poll. Users get sub-second updates.
+- **The poll lane stays on** but relaxes to a safety net (30s, or 120s+) while AMB
+  is confirmed live. If AMB drops, tighten it back automatically.
+- **A periodic full sweep** reconciles anything both lanes missed and baselines
+  newly appeared records.
+
+This way losing the AMB connection degrades latency instead of breaking the tool,
+and you are not paying full polling cost while push is working.
 
 ```javascript
-// Check if AMB client is available
-var ambClient = window.amb;
-if (!ambClient) {
-    // Try to find it on the ServiceNow global
-    try {
-        ambClient = window.NOW && window.NOW.amb;
-    } catch (e) {}
+var ambKickTimer = null, ambPendingKick = false, polling = false;
+
+function onAmbPush() {
+    clearTimeout(ambKickTimer);
+    ambKickTimer = setTimeout(function() {
+        // Coalesce: a poll already running absorbs this push.
+        if (polling) { ambPendingKick = true; return; }
+        poll('delta');
+    }, 800);
 }
 
-if (ambClient && typeof ambClient.getClient === 'function') {
-    var client = ambClient.getClient();
-
-    // Record update channel pattern (instance-specific)
-    // Common patterns:
-    //   /rw/default/{table}/{sys_id}
-    //   /glide/ui/update/{table}
-    client.subscribe('/rw/default/incident/' + sysId, function(message) {
-        console.log('Record updated:', message);
-        // message.data contains the change payload
-    });
+function afterPoll() {
+    polling = false;
+    if (ambPendingKick) { ambPendingKick = false; poll('delta'); }
 }
 ```
 
-**Warning:** Channel paths vary by instance version and configuration. The
-polling approach in this document is the portable solution. Only use direct
-AMB subscription when you have confirmed the channel structure on your
-target instance.
+Debouncing matters more than it looks: a single reassignment can fire watcher
+events on several tables at once, and without coalescing each one starts its own
+poll.
 
-## Choosing Between Polling and AMB
-
-| Factor | Delta Polling | Direct AMB |
-|--------|--------------|------------|
-| Latency | 5-30 seconds (your interval) | Sub-second |
-| Portability | Works on any instance | Instance-dependent channels |
-| API cost | Counted against rate limit | No Table API cost |
-| Complexity | Simple, stateless per-poll | Connection management, reconnect |
-| Reliability | Very high | Can drop during handshake issues |
-
-**Recommendation:** Use delta polling for most tools. Reserve direct AMB for
-tools where sub-second notification latency is the core feature and you can
-test on the target instance.
+See `polling-scheduler.md` for the lane structure, backoff, jitter, and
+visibility handling.

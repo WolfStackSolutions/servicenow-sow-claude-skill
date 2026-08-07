@@ -1,14 +1,60 @@
 # Settings Persistence
 
 SOW environments often block `localStorage` and `sessionStorage`. The proven
-fallback is the File System Access API with an IndexedDB handle cache.
+durable store is the File System Access API with an IndexedDB handle cache.
 
 ## Strategy
 
-1. **First choice**: `localStorage` (fast, synchronous, but may be blocked)
-2. **Durable storage**: File System Access API writes a JSON file to disk
-3. **Handle cache**: IndexedDB stores the file handle so subsequent reads/writes
-   are silent (no picker dialog)
+Do not treat `localStorage` as the primary store and the file as a fallback. In a
+locked-down environment that gets you a tool that works while you test it and
+forgets everything for real users. The layering that survives:
+
+1. **In-memory** on your namespace (`tk.state`) — always works, always the live
+   copy your UI reads.
+2. **A JSON file** via the File System Access API — the durable copy. The user
+   picks the location once.
+3. **IndexedDB** — caches the *file handle* only, so later saves and loads are
+   silent with no picker.
+4. **Download / file-input** — last-resort manual export and import when
+   `showSaveFilePicker` is unavailable.
+
+`localStorage` still has a place, just not this one. It is well suited to
+throwaway data where loss is acceptable: a response cache, or bulky event history
+you would not want in a settings file. Wrap every access in try/catch and treat
+failure as a cache miss.
+
+Three rules make the difference between this working and annoying users:
+
+- **Never open a file picker unprompted.** Restore silently if a handle is
+  cached; otherwise stay in memory until the user explicitly saves.
+- **Debounce writes** (around 800ms). Settings toggles fire in bursts.
+- **Gate autosave** behind a "synced" flag, so an early write cannot clobber a
+  good file with default state before the load has completed.
+
+```javascript
+var SETTINGS_FILE = 'sow_settings.json';
+var saveTimer = null;
+
+function saveState() {
+    if (!window.showSaveFilePicker || !tk.settingsHandle || !tk.settingsSynced) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(writeSettingsFile, 800);
+}
+
+// On startup: silent restore only, never a picker
+(function autoSync() {
+    if (!window.showSaveFilePicker || tk.settingsAutoSynced) return;
+    tk.settingsAutoSynced = true;
+    idbGet('settings').then(function(handle) {
+        if (!handle) return;                 // no handle yet: stay in memory
+        tk.settingsHandle = handle;
+        loadSettingsFile().then(function() { tk.settingsSynced = true; });
+    });
+})();
+```
+
+Include a schema version in the JSON from the first release. Migrating a file you
+already shipped without one means guessing at its shape.
 
 ## File System Access API Pattern
 
@@ -194,3 +240,47 @@ function lsSet(key, value) {
     } catch(e) {}
 }
 ```
+
+Silently swallowing the write failure is deliberate — a blocked or full
+`localStorage` must not break the tool. But it also means you cannot assume
+anything you wrote is still there.
+
+### Quota
+
+Growing collections (event history, seen-comment hashes) will eventually exceed
+quota. Truncate and retry rather than losing the whole record:
+
+```javascript
+function persist(state) {
+    try {
+        localStorage.setItem(LS_KEY, JSON.stringify(state));
+    } catch (e) {
+        // Almost certainly quota. Keep the newest slice and try once more.
+        try {
+            var trimmed = Object.assign({}, state, { events: state.events.slice(0, 50) });
+            localStorage.setItem(LS_KEY, JSON.stringify(trimmed));
+        } catch (e2) {}
+    }
+}
+```
+
+Cap caches by entry count too, evicting oldest first, so a long-lived tab does not
+grow without bound.
+
+### Stale handles
+
+A cached IndexedDB handle can point at a file the user has moved, renamed, or
+deleted. Reads then fail with `NotFoundError`. Treat that as "no handle" — clear
+the cache and fall back to in-memory state rather than repeatedly erroring:
+
+```javascript
+loadSettingsFile().catch(function(e) {
+    if (e && e.name === 'NotFoundError') {
+        tk.settingsHandle = null;
+        idbSet('settings', null);
+    }
+});
+```
+
+Permissions also lapse between sessions, so `ensurePermission` can return false on
+a handle that worked yesterday. Both cases should degrade quietly, not prompt.

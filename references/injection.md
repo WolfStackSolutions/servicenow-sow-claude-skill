@@ -74,12 +74,15 @@ watched roots and periodically scan for new ones:
 var watched = new WeakSet();
 var observers = [];
 
+// Your own logic: query this root for targets and inject into them.
+// Must be idempotent — it is called again on every mutation.
+function injectInto(root) { /* ... */ }
+
 function watchNewShadows(root) {
     if (!root) return;
     root.querySelectorAll('*').forEach(function(el) {
         if (el.shadowRoot && !watched.has(el.shadowRoot)) {
             watched.add(el.shadowRoot);
-            // Run your injection logic on this new shadow root
             injectInto(el.shadowRoot);
             // Watch it for future changes
             var obs = new MutationObserver(function() {

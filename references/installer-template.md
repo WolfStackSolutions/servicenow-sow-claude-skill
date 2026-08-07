@@ -4,9 +4,34 @@ A complete, copy-paste HTML template for bookmarklet installer pages.
 Includes drag-to-install, copy fallback, module listing, and the JavaScript
 wrapping logic. Replace the marked sections with your tool code.
 
-## Standard Template (Small-Medium Payloads)
+## Choosing a wrapping approach
 
-For tools under ~80KB encoded. Uses the `encodeURIComponent(functionBody)` approach.
+There is no byte threshold at which you must switch to base64. Measured from
+working tools:
+
+| Raw source | Encoded `javascript:` URI | Approach used |
+|-----------|---------------------------|----------------|
+| ~24KB | ~41KB | base64 constant in the page |
+| ~66KB | ~129KB | pre-encoded href, baked at build time |
+| ~184KB | ~300KB | base64 constant in the page |
+| ~493KB | ~942KB | `toString()` + `encodeURIComponent` |
+
+A ~490KB tool wrapped with plain `encodeURIComponent` works in Chrome. Firefox and
+Edge have lower URI limits, so treat very large payloads as Chrome-only unless
+tested.
+
+Pick based on how you maintain the installer, not on size:
+
+- **`function.toString()` + `encodeURIComponent`** (below) when the tool source
+  lives in the page and you want to keep editing it there.
+- **base64 constant** when the source is built elsewhere and pasted in — a single
+  opaque string is easier to regenerate than a giant escaped literal.
+- **Pre-baked href** when a build step produces the installer.
+
+## Standard Template
+
+Keeps the tool source editable inline. Uses the `encodeURIComponent(functionBody)`
+approach.
 
 ```html
 <!DOCTYPE html>
@@ -231,9 +256,13 @@ For tools under ~80KB encoded. Uses the `encodeURIComponent(functionBody)` appro
 </html>
 ```
 
-## Large Payload Template (Base64)
+## Base64 Template
 
-For tools over ~80KB. Encode the source as base64 and decode at install time:
+For sources built outside the page. Encode as base64 and decode at install time.
+
+Note the two differences from the standard template: there is no `void(...)`
+wrapper (the click is cancelled with `preventDefault` instead), and the decoded
+source is expected to be a self-contained IIFE rather than a bare function body.
 
 ```html
 <!-- Same HTML structure as above, but replace the <script> with: -->
@@ -251,18 +280,40 @@ For tools over ~80KB. Encode the source as base64 and decode at install time:
 
     var source = b64ToUtf8(PAYLOAD_B64);
     var href = 'javascript:' + encodeURIComponent(source);
-    document.getElementById('install-link').href = href;
 
-    document.getElementById('copy-btn').addEventListener('click', function() {
-        if (navigator.clipboard) {
-            navigator.clipboard.writeText(href).then(function() {
-                document.getElementById('copy-btn').textContent = 'Copied';
-            });
-        }
-        setTimeout(function() {
-            document.getElementById('copy-btn').textContent = 'Copy bookmarklet code';
-        }, 2000);
-    });
+    var link = document.getElementById('install-link');
+    link.setAttribute('href', href);
+    // Without void(...), clicking the link on the installer page would run the
+    // tool here instead of on SOW.
+    link.addEventListener('click', function(e) { e.preventDefault(); });
+
+    var btn = document.getElementById('copy-btn');
+    if (btn) {
+        btn.addEventListener('click', function() {
+            function done() {
+                btn.textContent = 'Copied';
+                setTimeout(function() {
+                    btn.textContent = 'Copy bookmarklet code';
+                }, 2000);
+            }
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(href).then(done).catch(fallback);
+            } else {
+                fallback();
+            }
+            function fallback() {
+                var ta = document.createElement('textarea');
+                ta.value = href;
+                ta.setAttribute('aria-hidden', 'true');
+                ta.style.cssText = 'position:fixed;left:-9999px;';
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } catch (e) {}
+                ta.remove();
+                done();
+            }
+        });
+    }
 })();
 </script>
 ```

@@ -1,23 +1,27 @@
 ---
 name: servicenow-sow-bookmarklet
 description: >
-  Build bookmarklet-based tools for ServiceNow's Service Operations Workspace (SOW).
-  Covers CSRF auth via g_ck and X-UserToken, Table API, Service Catalog API, Attachment
-  API, SPA navigation, Shadow DOM traversal, MutationObservers, real-time AMB/CometD
-  push, Genesys Cloud softphone hooks, rate-limit budgeting, and the bookmarklet plus
-  HTML-installer delivery pattern. Use when the user asks to build a bookmarklet,
-  userscript, browser extension, or injected tool targeting SOW or the SWP portal.
-  Also use for any ServiceNow Table API, Service Catalog API, or Attachment API work
-  that runs client-side in the browser, or when the user mentions SOW, g_ck,
-  X-UserToken, or ServiceNow workspace injection.
+  Build bookmarklet and injected browser tools for ServiceNow's Service Operations
+  Workspace (SOW). Use when the user asks for a bookmarklet, userscript, or injected
+  tool targeting SOW or the SWP portal, or mentions SOW, g_ck, X-UserToken, or
+  ServiceNow workspace injection. Covers CSRF auth via g_ck and X-UserToken, Table
+  Stats Presence Attachment and Service Catalog APIs, rate-limit budgeting, Shadow
+  DOM traversal and MutationObservers, SPA navigation, delta polling and AMB record
+  watchers, Genesys Cloud softphone hooks, cross-origin postMessage bridges, and the
+  bookmarklet plus HTML-installer delivery pattern.
 license: MIT
 ---
 
 # ServiceNow SOW Bookmarklet Skill
 
 Build browser-side tools that inject into ServiceNow's Service Operations Workspace.
-Everything here was reverse-engineered from production SOW instances and represents
-working, tested patterns.
+Everything here was reverse-engineered from production SOW instances and verified
+against working tools running on a live instance.
+
+Specific values — macroponent ids, state codes, ticket prefixes, rate limits,
+Genesys status names — come from observed instances and are configurable per org.
+Prefer the discovery patterns each reference describes over the literal values, and
+verify constants before relying on them.
 
 ## File map
 
@@ -25,20 +29,22 @@ Load these on demand. Do not read them all up front.
 
 | File | Read it when |
 |------|--------------|
-| `references/api.md` | Any HTTP call: Table API read/PATCH, Service Catalog order_now, Attachment upload, current user, ticket/caller resolution, rate-limit budget tracker |
-| `references/gotchas.md` | Before writing any code. 28 non-obvious traps grouped by API, DOM, storage, bookmarklet, and performance |
+| `references/api.md` | Any HTTP call: auth and `getToken()`, Table API read/PATCH, pagination, Stats (aggregate) and Presence APIs, Service Catalog order_now, Attachment upload, ticket/caller resolution, rate-limit budget tracker |
+| `references/gotchas.md` | Before writing any code. Non-obvious traps grouped by API, DOM, storage, bookmarklet, and performance |
 | `references/dom-structure.md` | Locating an injection target in SOW's component tree |
-| `references/injection.md` | Shadow DOM traversal, MutationObservers, SPA nav hooks, fetch interception, tool lifecycle and cleanup |
-| `references/ui-patterns.md` | Building a panel, FAB, toast, modal, header widget, or draggable surface |
-| `references/comments.md` | Journal parsing (`sys_journal_field` plus inline fallback), content-addressed dedup, snapshot-diff change detection, closed state codes |
-| `references/amb.md` | Real-time push, notification interception, delta polling with high-water marks |
+| `references/injection.md` | Shadow DOM traversal, MutationObservers, click handling across shadow roots, fetch interception, background-tab throttling, tool lifecycle and cleanup |
+| `references/ui-patterns.md` | Building a panel, FAB, toast stack, modal, header widget, or draggable surface; escaping and z-index layering |
+| `references/comments.md` | Journal parsing (inline primary, `sys_journal_field` where ACLs allow), dedup, snapshot-diff change detection, closed state codes, interaction linking |
+| `references/polling-scheduler.md` | Anything that watches records over time: lanes, high-water marks, jitter, backoff, hidden tabs, AMB coalescing |
+| `references/amb.md` | Real-time push via `g_ambClient` record watchers, notification interception |
+| `references/postmessage-bridge.md` | Pulling data from another origin's tab into SOW over `postMessage` |
 | `references/genesys.md` | Softphone postMessage schema, call lifecycle, call timers |
 | `references/settings.md` | Persisting settings where localStorage is blocked (File System Access API plus IndexedDB handle cache) |
 | `references/installer-template.md` | Producing the deliverable HTML installer page |
 | `examples/minimal-injector.js` | Smallest viable tool: re-entry guard, namespace, draggable panel |
 | `examples/table-query.js` | Smallest viable authenticated Table API query |
 | `examples/mutation-watcher.js` | Shadow DOM auto-discovery with periodic re-scan and cleanup |
-| `examples/menu-system.js` | Multi-tool toolkit: categorised toggle menu, on/off lifecycle, state persistence |
+| `examples/menu-system.js` | Multi-tool toolkit: categorised toggle menu, on/off lifecycle, in-session toggle state (see `settings.md` for durable persistence) |
 
 
 ## Architecture: Bookmarklet + HTML Loader
@@ -69,24 +75,16 @@ var href = 'javascript:void((function(){' + encodeURIComponent(body) + '})())';
 document.getElementById('install-link').href = href;
 ```
 
-For very large payloads (>50KB encoded), use a base64 approach:
+There is no size at which you must switch to base64 — a ~490KB tool works in
+Chrome with plain `encodeURIComponent`. Choose based on how the installer is
+maintained, and see `references/installer-template.md` for both templates with
+measured sizes.
 
-```javascript
-var B64_PAYLOAD = "base64-encoded-utf8-source...";
-function b64ToUtf8(b64) {
-    var bin = atob(b64);
-    var bytes = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder('utf-8').decode(bytes);
-}
-document.getElementById('install-link').href =
-    'javascript:' + encodeURIComponent(b64ToUtf8(B64_PAYLOAD));
-```
+### Re-entry guard and namespace
 
-### Re-entry guard
-
-Always guard against double-clicks. If the tool creates a visible element, check
-for it and toggle visibility instead of re-initializing:
+Bookmarklets get clicked twice. Every tool needs a re-entry guard that toggles
+instead of re-initialising, and a namespaced window object so state and cleanup
+functions survive a re-run:
 
 ```javascript
 var existing = document.getElementById('my-tool-panel');
@@ -94,41 +92,22 @@ if (existing) {
     existing.style.display = existing.style.display === 'none' ? 'block' : 'none';
     return;
 }
-```
-
-### Namespace isolation
-
-Store tool state on a namespaced window object to survive re-runs:
-
-```javascript
 if (!window._myToolkit) window._myToolkit = {};
 var tk = window._myToolkit;
-if (!tk.state) tk.state = {};
 ```
+
+Full lifecycle and cleanup patterns are in `references/injection.md`;
+`examples/minimal-injector.js` is the smallest complete version.
 
 ## Authentication: CSRF Tokens
 
-Every API call to ServiceNow requires a CSRF token sent as the `X-UserToken` header.
-The token is available from multiple sources (try in order):
+Every API call needs the CSRF token in the `X-UserToken` header, plus the session
+cookie via `credentials: 'include'`. On a normal SOW page `window.g_ck` is
+usually enough, with fallbacks through `NOW.g_ck`, `window.top.g_ck`,
+`NOW.csrf_token`, and a `meta[name="X-UserToken"]` tag.
 
-```javascript
-function getToken() {
-    // Primary: global g_ck variable (always present in SOW)
-    if (typeof g_ck !== 'undefined' && g_ck) return g_ck;
-    if (window.g_ck) return window.g_ck;
-    // Fallback: NOW namespace
-    if (window.NOW && window.NOW.csrf_token) return window.NOW.csrf_token;
-    if (window.NOW && window.NOW.g_ck) return window.NOW.g_ck;
-    // Fallback: cross-frame (may throw in sandboxed iframes)
-    try { if (window.top.g_ck) return window.top.g_ck; } catch (e) {}
-    // Last resort: meta tag
-    try {
-        var meta = document.querySelector('meta[name="X-UserToken"]');
-        if (meta) return meta.getAttribute('content') || '';
-    } catch (e) {}
-    return '';
-}
-```
+`references/api.md` has the full `getToken()` implementation, the request header
+defaults, and the token-rotation retry that long-running pollers need.
 
 ## API Reference
 
@@ -138,27 +117,37 @@ See `references/api.md` for full details. Summary of available APIs:
 |-----|--------|----------|---------|
 | Table API (read) | GET | `/api/now/table/{table}` | Query any table |
 | Table API (update) | PATCH | `/api/now/table/{table}/{sys_id}` | Update a record |
+| Stats API | GET | `/api/now/stats/{table}` | Grouped counts without fetching rows |
 | Attachment API | POST | `/api/now/attachment/file` | Upload file attachments |
 | Service Catalog | POST | `/api/sn_sc/servicecatalog/items/{item_id}/order_now` | Order a catalog item |
-| Current User | GET | `/api/now/ui/user/current_user` | Get logged-in user info |
+| Current User | GET | `/api/now/ui/user/current_user` | Logged-in user (sys_id is `user_sys_id`) |
+| Presence | GET | `/api/now/ui/presence` | Who is currently online |
+| Interaction link | POST | `/api/now/table/interaction_related_record` | Associate a ticket with an IMS |
 
 All requests need `credentials: 'include'` (or `withCredentials = true` for XHR)
 and the `X-UserToken` header.
+
+Non-obvious response shapes, both of which fail silently:
+
+- `current_user` returns the sys_id as **`user_sys_id`**, not `sys_id`.
+- `order_now` returns the request sys_id as **`result.sys_id`**, not `request_id`.
 
 ## Rate Limiting
 
 ServiceNow instances typically enforce rate limits on the Table API:
 
-- **100 requests per user per hour**, hard reset on the clock hour
+- **100 requests per user per hour**, reset on the clock hour
 - No `x-ratelimit-remaining` header (must be tracked client-side)
-- Headers returned: `x-ratelimit-limit`, `x-ratelimit-reset`, `x-ratelimit-rule`
-- Header presence is inconsistent (identical calls may or may not include them)
-- A 429 response includes a `retry-after` header
-- The workspace itself issues ~4 table API calls per ticket switch
+- Headers returned when a call counts: `x-ratelimit-limit`, `x-ratelimit-reset`,
+  `x-ratelimit-rule`. Absence does not reliably mean the call was free
+- A 429 response includes a `retry-after` header — honour it
+- The workspace issues its own Table API calls on every tab switch, so never
+  assume the full 100 are yours
 
-**Always implement client-side budget tracking.** See `references/api.md` for the
-full budget tracker pattern with localStorage persistence, deduplication, caching,
-and a fetch observer that counts every Table API call on the page.
+**Always implement client-side budget tracking**, shared across tools on the page.
+See `references/api.md`. Charge your own calls plus anything the server flags;
+counting every Table API call on the page instead means the workspace's own
+traffic exhausts your budget.
 
 ## DOM Injection
 
@@ -168,36 +157,56 @@ See `references/injection.md` for MutationObserver and Shadow DOM patterns.
 Key principles:
 - SOW is a single-page app. `DOMContentLoaded` fires once, ever. Use MutationObservers.
 - SOW uses nested web components with Shadow DOM. You must walk shadow roots.
-- Tab switches do not cause page loads. Use `pushState`/`popstate` for SPA navigation.
+- Register click handlers in the **capture phase** on each shadow root; events
+  retargeted at the host will not reach a bubbling listener intact.
+- Use `composedPath()` for click-outside checks, not `contains(e.target)`.
+- Discover injection targets by selector or tag name. Hardcoded macroponent ids
+  are instance-specific and are the main reason a tool works on one instance and
+  does nothing on another.
 - Every tool needs a cleanup function. Return it from `on()` and call it from `off()`.
 
 ## UI Patterns
 
 See `references/ui-patterns.md` for panel, FAB, toast, modal, and header injection
-patterns used by production SOW tools.
+patterns, plus z-index layering so tools coexist.
 
-## Real-Time: AMB/CometD
+Escape ticket data before any `innerHTML`. Short descriptions, comments, user
+names and API error messages are all attacker-influenced, and your tool runs with
+the user's full session.
 
-ServiceNow uses AMB (Asynchronous Message Bus) over CometD for real-time push.
-The channel subscription pattern is documented in `references/amb.md`.
+## Real-Time and Polling
+
+Anything watching records over time needs a scheduler, not a `setInterval`. See
+`references/polling-scheduler.md` for lanes, high-water marks with overlap,
+jitter, backoff, and hidden-tab handling.
+
+For push, subscribe through `window.g_ambClient.getRecordWatcherChannel(table,
+query)` — see `references/amb.md`. Treat a push as a trigger to run your delta
+poll, not as data, and always keep the polling lane alive as the fallback.
+
+To pull data from another origin's tab into SOW, see
+`references/postmessage-bridge.md`.
 
 ## Genesys Cloud Integration
 
 SOW integrates Genesys Cloud via a softphone iframe that communicates over
-`postMessage`. See `references/genesys.md` for the message schema.
+`postMessage`. Listen on the **iframe's `contentWindow`** in the capture phase,
+not on the host `window`. See `references/genesys.md` for the message schema.
 
 ## Settings Persistence
 
-SOW environments often block `localStorage`. Use the File System Access API
-with an IndexedDB handle cache for durable settings. See `references/settings.md`.
+SOW environments often block `localStorage`. Keep live state in memory, persist
+durably to a JSON file via the File System Access API, and cache the file handle
+in IndexedDB so restores are silent. See `references/settings.md`.
 
 ## Common Pitfalls
 
-Read `references/gotchas.md` before building anything. It covers every non-obvious
-trap: `sysparm_display_value=all` being essential, reference fields being objects not
-strings, events not bubbling out of shadow DOM, `now-alert` focus stealing, IMS using
-`opened_for` instead of `caller_id`, localStorage being blocked, the workspace
-consuming your rate limit, and many more.
+Read `references/gotchas.md` before building anything. Among the traps that cost
+the most time: `sysparm_display_value=all` is essential; reference fields are
+objects, not strings; the caller field is different on every table; blocked
+journal ACLs return HTTP 200 with zero rows rather than an error; events do not
+bubble out of shadow DOM; `now-alert` steals focus; `localStorage` may be blocked
+entirely; and the workspace consumes your rate limit.
 
 ## Installer Page Design
 
