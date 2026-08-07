@@ -171,20 +171,29 @@ Chrome happily carries a ~490KB tool this way. See
 
 ## Install
 
-```bash
-npx @wolfstack/sow-skill
-```
-
-```bash
-npx @wolfstack/sow-skill --global
-```
-
-Or clone it:
+Clone the repo and drop it where your assistant looks for skills:
 
 ```bash
 git clone https://github.com/WolfStackSolutions/servicenow-sow-claude-skill.git
+```
+
+**Claude Code**
+
+```bash
 cp -r servicenow-sow-claude-skill ~/.claude/skills/servicenow-sow-bookmarklet
 ```
+
+**Cursor**
+
+```bash
+cp -r servicenow-sow-claude-skill ~/.cursor/skills/servicenow-sow-bookmarklet
+```
+
+(Or open this repo and work from it directly — same files.)
+
+> There isn’t an `npx` installer yet. That would mean publishing an npm package
+> whose job is just to copy these files into the skills folder. Easy to add
+> later if you want one-liner installs; for now clone/copy is the real path.
 
 ## Try the demos
 
