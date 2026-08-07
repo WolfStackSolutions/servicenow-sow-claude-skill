@@ -4,3 +4,5 @@ node_modules/
 *.log
 text.txt
 realcode/
+dist/
+*.skill.zip

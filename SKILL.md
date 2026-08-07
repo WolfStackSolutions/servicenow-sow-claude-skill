@@ -1,14 +1,9 @@
 ---
 name: servicenow-sow-bookmarklet
 description: >
-  Build bookmarklet and injected browser tools for ServiceNow's Service Operations
-  Workspace (SOW). Use when the user asks for a bookmarklet, userscript, or injected
-  tool targeting SOW or the SWP portal, or mentions SOW, g_ck, X-UserToken, or
-  ServiceNow workspace injection. Covers CSRF auth via g_ck and X-UserToken, Table
-  Stats Presence Attachment and Service Catalog APIs, rate-limit budgeting, Shadow
-  DOM traversal and MutationObservers, SPA navigation, delta polling and AMB record
-  watchers, Genesys Cloud softphone hooks, cross-origin postMessage bridges, and the
-  bookmarklet plus HTML-installer delivery pattern.
+  Build ServiceNow SOW bookmarklets and injected browser tools. Use for SOW/SWP
+  portal tools, g_ck, X-UserToken, Table API, shadow DOM injection, AMB watchers,
+  or Genesys softphone hooks.
 license: MIT
 ---
 

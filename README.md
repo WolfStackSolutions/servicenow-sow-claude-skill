@@ -171,7 +171,51 @@ Chrome happily carries a ~490KB tool this way. See
 
 ## Install
 
-Clone the repo and drop it where your assistant looks for skills:
+### Claude.ai (web / desktop GUI)
+
+Yes — the web UI wants a **ZIP**. Not a loose folder, not a single `SKILL.md`.
+
+1. Build the zip (from this repo):
+
+```bash
+chmod +x scripts/pack-for-claude.sh
+./scripts/pack-for-claude.sh
+# → dist/servicenow-sow-bookmarklet.zip
+```
+
+   Or by hand: zip the **folder** so the archive looks like this (folder at the
+   root, not bare files):
+
+```
+servicenow-sow-bookmarklet.zip
+└── servicenow-sow-bookmarklet/
+    ├── SKILL.md
+    ├── LICENSE
+    ├── references/
+    └── examples/
+```
+
+   Wrong (Claude won’t find the skill):
+
+```
+servicenow-sow-bookmarklet.zip
+├── SKILL.md          ← files dumped at zip root
+└── references/
+```
+
+2. In [claude.ai](https://claude.ai): **Customize → Skills → Upload skill**
+   (wording may say Settings → Capabilities / Features depending on the UI).
+3. Pick `servicenow-sow-bookmarklet.zip`.
+4. **Toggle the skill ON** after upload — upload alone doesn’t enable it.
+5. Needs a paid plan with **code execution** enabled for custom skills.
+
+The folder name must match the skill `name` in `SKILL.md`
+(`servicenow-sow-bookmarklet`). Demos and the README banner are left out of the
+zip on purpose — Claude only needs the skill + references + examples.
+
+### Claude Code / Cursor (filesystem)
+
+Clone and copy into the skills folder:
 
 ```bash
 git clone https://github.com/WolfStackSolutions/servicenow-sow-claude-skill.git
@@ -191,9 +235,9 @@ cp -r servicenow-sow-claude-skill ~/.cursor/skills/servicenow-sow-bookmarklet
 
 (Or open this repo and work from it directly — same files.)
 
-> There isn’t an `npx` installer yet. That would mean publishing an npm package
-> whose job is just to copy these files into the skills folder. Easy to add
-> later if you want one-liner installs; for now clone/copy is the real path.
+> There isn’t an `npx` installer yet. That would be a tiny npm package that just
+> copies these files into the skills folder. Easy to add later; clone/copy (or
+> the Claude.ai zip) is the real path today.
 
 ## Try the demos
 
