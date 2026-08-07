@@ -52,15 +52,46 @@ var groupName = dv(record.assignment_group);  // "Service Desk Team"
 var groupId = rv(record.assignment_group);     // "abc123def456..."
 ```
 
-### IMS uses `opened_for`, not `caller_id`
+### The caller field is different on every table
 
-The `interaction` (IMS) table stores the caller in `opened_for`.
-The `incident` table stores it in `caller_id`. Every other table uses
-`caller_id`. If you hardcode `caller_id`, IMS lookups silently return nothing.
+There is no field that works everywhere. `caller_id` only exists on `incident`
+and its descendants. Hardcoding it makes lookups return nothing at all on
+catalog and interaction records, with no error to tell you why.
 
 ```javascript
-var callerField = (table === 'interaction') ? 'opened_for' : 'caller_id';
+var CALLER_FIELDS = {
+    interaction:    'opened_for',      // IMS customer
+    incident:       'caller_id',
+    sc_req_item:    'requested_for',   // RITM beneficiary
+    sc_request:     'requested_for',
+    sc_task:        'opened_by',       // SCTASK has no caller field at all
+    change_request: 'requested_by'
+};
+
+function callerField(table) {
+    return CALLER_FIELDS[table] || 'caller_id';
+}
 ```
+
+Two further traps:
+
+- **`sc_task` genuinely has no caller.** Resolve the person through the parent
+  RITM (`request_item`), or accept `opened_by` as an approximation. Which you
+  want depends on whether you need "who benefits" or "who raised it".
+- **The primary field is often empty** on records raised on someone's behalf.
+  Always keep `opened_by` as a fallback:
+
+```javascript
+var personSysId = rv(rec[callerField(table)]) || rv(rec.opened_by);
+```
+
+### `sc_req_item` shows RITM numbers, `sc_request` shows REQ
+
+These are different tables and it is easy to mislabel them. A `RITM…` number
+lives on `sc_req_item`; a `REQ…` number lives on `sc_request`. If you label
+`sc_req_item` as "REQ" in a UI, users will look for a REQ record that does not
+match what you queried. Associate to `sc_request` when linking a whole request,
+and to `sc_req_item` when acting on one line item.
 
 ### sys_journal_field may be silently blocked
 
@@ -84,10 +115,47 @@ client-side (see api.md).
 
 ### The workspace itself consumes your rate limit
 
-SOW issues approximately 4 Table API calls every time the user switches tabs
-(against `sys_user`, `incident`, `sc_req_item`, `sc_task`). These count
-against the same 100/hour cap your tools use. Always reserve headroom
-(at least 10 requests) and never assume all 100 are yours.
+SOW issues its own Table API calls every time the user switches tabs (against
+`sys_user`, `incident`, `sc_req_item`, `sc_task`) — observed at roughly 4 per
+switch, though this is a field observation rather than a documented constant.
+They count against the same cap your tools use. Reserve headroom (at least 10
+requests) and never assume all 100 are yours.
+
+Do **not** solve this by counting every Table API call on the page. You cannot
+control the workspace's traffic, and charging it to your budget makes your tools
+stop working during normal navigation. Charge your own calls, plus anything the
+server explicitly flags with `x-ratelimit-*` headers or a 429.
+
+### Batch journal and detail reads, or you will trigger 429s
+
+Fanning out one request per tracked ticket looks fine with 5 tickets and takes
+down the whole tool at 200. Cap the work per cycle and stop early on the first
+429 instead of letting the remaining batches pile on:
+
+```javascript
+var MAX_READS = 12;                       // per poll cycle
+var BATCH = 4;                            // concurrent within a cycle
+var queue = tickets.slice(0, MAX_READS);
+
+function runBatch() {
+    if (!queue.length) return Promise.resolve();
+    var slice = queue.splice(0, BATCH);
+    return Promise.all(slice.map(readOne)).then(function(results) {
+        // A 429 anywhere means stop; retry next cycle with backoff.
+        if (results.some(function(r) { return r && r.status === 429; })) return;
+        return runBatch();
+    });
+}
+```
+
+Anything that could not be read this cycle should be re-queued, not dropped —
+otherwise those tickets stay silent forever.
+
+### Serialise multi-table polls with small gaps
+
+Firing all table queries in one `Promise.all` burst is the fastest way to hit a
+rate-limit rule. Space them 40-150ms apart. The extra latency is invisible to
+users; the 429 is not.
 
 ### User records may have leading whitespace
 
@@ -231,9 +299,13 @@ page reloads.
 
 ### URI length limits
 
-Very large bookmarklets (>100KB encoded) may hit browser URI length limits.
-Chrome's is ~2MB, but Firefox and Edge are lower. For large tools, use the
-base64 approach (see SKILL.md) or split into multiple bookmarklets.
+Chrome's bookmarklet limit is generous — a ~490KB tool encodes to roughly 940KB
+of `javascript:` URI and still works. Firefox and Edge are lower, so treat large
+payloads as Chrome-only unless you have tested elsewhere.
+
+Size is not the reason to reach for base64. Use it when a giant string literal
+would make the installer page unmaintainable, not at any particular byte count.
+See `installer-template.md` for measured sizes of real tools.
 
 ### `javascript:` URI encoding
 
@@ -252,7 +324,43 @@ accidental global variable creation can collide with SOW's own globals.
 
 Some instances have an endpoint called `agentic_processing` that 400-errors
 every ~6 seconds in the background. This is harmless but noisy in the console.
-If you hook `fetch()`, consider stubbing it with an empty 200 response.
+If you hook `fetch()`, you can stub it with an empty 200 response.
+
+Treat this as opt-in, not a default. Faking a 200 for a real platform call hides
+genuine failures, so scope the stub to one tool that the user can turn off, keep
+a reference to the original `fetch`, and restore it on teardown:
+
+```javascript
+var origFetch = window.fetch;
+window.fetch = function() { /* stub agentic_processing only */ };
+return function cleanup() { window.fetch = origFetch; };
+```
+
+### Never render ticket data with `innerHTML` unescaped
+
+Short descriptions, comments, user names and API error messages are all
+attacker-influenced. Building HTML from them directly is an injection bug in a
+tool that runs with the user's full session.
+
+Use `textContent` for plain strings, and escape before any `innerHTML`:
+
+```javascript
+function esc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+row.innerHTML = '<span class="num">' + esc(t.number) + '</span>' +
+                '<span class="desc">' + esc(t.short_description) + '</span>';
+```
+
+### Confirm before any write
+
+A bookmarklet runs with the user's full permissions and bulk tools can touch
+hundreds of records. Gate every PATCH, `order_now`, or association behind an
+explicit confirmation, and for bulk actions make the user type the affected count
+before the button arms. There is no undo.
 
 ### Deep shadow DOM walks are expensive
 

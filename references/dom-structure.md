@@ -53,35 +53,45 @@ function getTabRoot() {
 The workspace header sits inside a shadow root. To inject a widget (like a search
 bar or timer) into the header:
 
-```javascript
-function findHostWith(selector) {
-    // Walk every shadow root in the document to find the one containing this selector
-    function walk(root, depth) {
-        if (!root || depth > 30) return null;
-        try {
-            if (root.querySelector(selector)) return root;
-            var all = (root.host ? root : root).querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                if (all[i].shadowRoot) {
-                    var found = walk(all[i].shadowRoot, depth + 1);
-                    if (found) return found;
-                }
-            }
-        } catch (e) {}
-        return null;
-    }
-    return { shadowRoot: walk(document, 0) };
-}
+`findHostWith` (defined in `injection.md`) returns the **host element** whose
+shadow root contains the selector, so callers reach through `host.shadowRoot`:
 
+```javascript
 function mountInHeader(element) {
     var host = findHostWith('.polaris-header-controls');
     if (!host || !host.shadowRoot) return false;
     var controls = host.shadowRoot.querySelector('.polaris-header-controls');
     if (!controls) return false;
-    controls.insertBefore(element, controls.firstChild);
+    // Sit to the left of the search box when there is one.
+    var search = controls.querySelector('.search-container');
+    if (search) controls.insertBefore(element, search);
+    else controls.insertBefore(element, controls.firstChild);
     return true;
 }
 ```
+
+This is selector-based, so unlike `getTabRoot()` it does not depend on any
+instance-specific macroponent id. Prefer it.
+
+Header chrome is rebuilt on navigation, which silently detaches your widget.
+Watch for that and re-mount, debounced so a burst of mutations causes one
+re-mount rather than hundreds:
+
+```javascript
+var queued = false;
+var obs = new MutationObserver(function() {
+    if (queued || element.isConnected) return;
+    queued = true;
+    setTimeout(function() {
+        queued = false;
+        try { mountInHeader(element); } catch (e) {}
+    }, 120);
+});
+obs.observe(document.body, { childList: true, subtree: true });
+```
+
+If the header slot cannot be found at all, fall back to a fixed-position element
+on `document.body` rather than failing to render.
 
 ### Contact Cards
 
@@ -107,10 +117,29 @@ function findContactCards() {
 }
 ```
 
-Contact cards carry an `aria-label` attribute that identifies them:
-- `"Caller"` -- the caller on an incident
-- `"Opened by"` -- the agent who opened the record
-- `"Opened for"` -- the user on an interaction (IMS)
+Contact cards carry an `aria-label` that identifies their role, containing
+`"Caller"` (incident caller), `"Opened by"` (the agent, not the customer), or
+`"Opened for"` (the IMS customer).
+
+Match on lowercased **substrings**, not exact equality — labels carry extra text
+and differ between record types. Almost every tool wants the customer, which
+means explicitly excluding the agent card:
+
+```javascript
+var label = (card.getAttribute('aria-label') || '').toLowerCase();
+if (label.indexOf('opened by') > -1) return;                      // agent, skip
+if (label.indexOf('caller') < 0 && label.indexOf('opened') < 0) return;
+```
+
+Inject inside the card's own shadow root, not next to the host:
+
+```javascript
+var sr = card.shadowRoot;
+if (!sr) return;
+var container = sr.querySelector('.sn-contact-card--content')
+             || sr.querySelector('.sn-contact-card--container');
+if (container) container.appendChild(myBadge);
+```
 
 ### Active Tab Detection
 
@@ -122,6 +151,50 @@ function getActiveTabLabel() {
     if (!selected) return null;
     var label = selected.querySelector('.sn-chrome-one-tab-label');
     return label ? label.textContent.trim() : null;
+}
+```
+
+### Which ticket is the user actually on?
+
+Sub-tabs break the simple version above. An INC opened inside an IMS means **two**
+tabs report `is-selected`, and the parent usually wins the query. Collect all
+selected tabs across shadow roots and prefer the non-IMS one, since that is the
+record the user is working in:
+
+```javascript
+function getActiveTicketNumber() {
+    var numbers = [];
+    function walk(root, depth) {
+        if (!root || depth > 30) return;
+        root.querySelectorAll('.sn-chrome-one-tab.is-selected').forEach(function(tab) {
+            var label = tab.querySelector('.sn-chrome-one-tab-label');
+            var text = (label ? label.textContent : tab.textContent).trim();
+            var m = text.match(/\b(INC|RITM|REQ|IMS|SCTASK)\d{5,}\b/);
+            if (m) numbers.push(m[0]);
+        });
+        root.querySelectorAll('*').forEach(function(el) {
+            if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
+        });
+    }
+    walk(document, 0);
+    var nonIms = numbers.filter(function(n) { return n.indexOf('IMS') !== 0; });
+    return nonIms.length ? nonIms[nonIms.length - 1]
+                         : numbers[numbers.length - 1] || null;
+}
+```
+
+### Skip hidden tabs when reading fields
+
+Background tabs keep their DOM mounted, so a field query happily returns values
+from a ticket the user is not looking at. Check visibility first:
+
+```javascript
+function isVisible(el) {
+    if (!el) return false;
+    var r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    var cs = getComputedStyle(el);
+    return cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0';
 }
 ```
 
@@ -161,21 +234,45 @@ element.mainConfig = {
 These can be patched at runtime to raise limits and improve performance.
 Use a periodic reassert (every 3s) because the framework may rewrite them:
 
+Discover the components by **tag name plus the presence of the config property**.
+The config lives on either `SN-CANVAS-TABSDATA` or `SN-CANVAS-TABS` depending on
+the release, so checking only one finds nothing on some instances:
+
 ```javascript
 var origConfig = null;
-function applyLimits() {
+
+function findTabEls() {
+    var els = [];
     walkAll(document.body, function(el) {
-        if (el.tagName === 'SN-CANVAS-TABS' && el.tabConfig) {
-            if (!origConfig) origConfig = Object.assign({}, el.tabConfig);
-            el.tabConfig = Object.assign({}, el.tabConfig, {
-                maxMainTabLimit: 16,
-                maxTotalSubTabLimit: 40
-            });
+        var tag = el.tagName;
+        if ((tag === 'SN-CANVAS-TABSDATA' || tag === 'SN-CANVAS-TABS') &&
+            el.tabConfig && typeof el.tabConfig === 'object') {
+            els.push(el);
         }
     });
+    return els;
 }
-setInterval(applyLimits, 3000);
+
+function applyLimits(maxMain) {
+    findTabEls().forEach(function(el) {
+        if (!origConfig) origConfig = Object.assign({}, el.tabConfig);
+        el.tabConfig = Object.assign({}, el.tabConfig, {
+            maxMainTabLimit: maxMain,
+            maxTotalSubTabLimit: Math.max(40, maxMain * 2)
+        });
+    });
+}
+setInterval(function() { applyLimits(16); }, 3000);
 ```
+
+The elements themselves get swapped out, not just their config, so re-find them
+on each pass (or check `el.isConnected`) rather than caching the references. On
+teardown, restore `origConfig` — leaving raised limits behind changes workspace
+behaviour after your tool is gone.
+
+Screen pool size (`mainConfig` on `SN-CANVAS-MAIN`) is a separate control with its
+own trade-off: more cached pages means faster tab switching and more memory.
+Patch it independently of tab limits.
 
 ## Web Component Tag Reference
 
@@ -191,6 +288,40 @@ setInterval(applyLimits, 3000);
 | `now-alert` | Notification banners |
 | `macroponent-c5d9c004...` | Mounted record page instance |
 
-Note: macroponent IDs are instance-specific. The ones listed here are from
-observed production instances but may differ. Use tag name patterns or walk
-the tree dynamically when possible.
+Macroponent IDs are **instance-specific**. The full 32-character hashes above come
+from one observed production instance and are the single biggest portability risk
+in any SOW tool — on a different instance `getTabRoot()` returns `null` forever
+and every feature built on it silently does nothing.
+
+Prefer, in order:
+
+1. **A selector plus `findHostWith`** — `findHostWith('.polaris-header-controls')`,
+   `findHostWith('.sn-chrome-tabs-group')`. No ids involved.
+2. **Tag name plus a property check** — `SN-CANVAS-TABS` with a `tabConfig`,
+   `SN-CANVAS-MAIN` with a `mainConfig`.
+3. **A tag-name prefix** when you only need to count or locate instances:
+
+```javascript
+// Matches macroponent-c5d9c004... without pinning the whole hash
+if (/^MACROPONENT-C5D9C004/i.test(el.tagName)) recordPages.push(el);
+```
+
+Reach for hardcoded macroponent ids only as a last resort, and always guard the
+null case so the tool degrades instead of throwing.
+
+### Selectors stable across instances
+
+These class names are part of the workspace chrome rather than generated
+component ids, and are safe to target:
+
+| Selector | Purpose |
+|----------|---------|
+| `.sn-chrome-tabs-group` | Tab list container |
+| `.sn-chrome-tabs-content` | Tab strip content area |
+| `.sn-chrome-one-tab` | A single tab |
+| `.sn-chrome-one-tab.is-selected` | Active tab |
+| `.sn-chrome-one-tab-label` | Ticket number text |
+| `.polaris-header-controls` | Header control strip |
+| `.sn-contact-card--content` | Inside a contact card's shadow root |
+| `a[data-testisrecordlink="true"]` | Record links |
+| `now-record-common-uiactionbar` | Record action bar |

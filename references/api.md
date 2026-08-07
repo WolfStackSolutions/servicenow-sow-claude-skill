@@ -1,7 +1,63 @@
 # ServiceNow API Reference (Client-Side)
 
 All calls run from the browser inside the SOW session. Authentication uses the
-session cookie (`credentials: 'include'`) plus the CSRF token as `X-UserToken`.
+session cookie plus the CSRF token as `X-UserToken`.
+
+## Authentication and CSRF Token
+
+Every example below calls `getToken()`. Define it once per tool. Production tools
+use slightly different chains; this is the widest one:
+
+```javascript
+function getToken() {
+    if (typeof g_ck !== 'undefined' && g_ck) return g_ck;
+    if (window.g_ck) return window.g_ck;
+    if (window.NOW && window.NOW.g_ck) return window.NOW.g_ck;
+    try { if (window.top && window.top.g_ck) return window.top.g_ck; } catch (e) {}
+    if (window.NOW && window.NOW.csrf_token) return window.NOW.csrf_token;
+    try {
+        var meta = document.querySelector('meta[name="X-UserToken"]');
+        if (meta) return meta.getAttribute('content') || '';
+    } catch (e) {}
+    return '';
+}
+```
+
+On a normal SOW page `window.g_ck` alone is usually enough. The `window.top`
+fallback matters when your code ends up running inside a frame.
+
+Tools that write (PATCH, POST, `order_now`) should **abort** when no token is
+found rather than firing requests that will 401:
+
+```javascript
+var TOKEN = getToken();
+if (!TOKEN) { console.warn('no g_ck token, aborting'); return; }
+```
+
+### Request defaults
+
+| Header / option | Value |
+|-----------------|-------|
+| `Accept` | `application/json` |
+| `X-UserToken` | CSRF token (required for writes) |
+| `credentials` | `'include'` — `'same-origin'` also works on same-host pages |
+| `Content-Type` | `application/json` — only when sending a JSON body |
+
+### Token rotation
+
+On a long-running poller the session token can rotate mid-session. Retry once
+with a freshly read token before surfacing a 401:
+
+```javascript
+if (r.status === 401) {
+    var t2 = getToken();
+    if (t2 && t2 !== TOKEN) {
+        TOKEN = t2;
+        return fetch(url, { credentials: 'include',
+            headers: { Accept: 'application/json', 'X-UserToken': TOKEN } });
+    }
+}
+```
 
 ## Table API -- Read
 
@@ -17,8 +73,16 @@ GET /api/now/table/{table_name}?{params}
 | `sysparm_fields` | Comma-separated field list | `sys_id,number,state` |
 | `sysparm_limit` | Max rows returned | `10` |
 | `sysparm_display_value` | Return display values | `all` (returns both raw + display) |
-| `sysparm_exclude_reference_link` | Skip ref links | `true` (saves bandwidth) |
-| `sysparm_offset` | Pagination offset | `100` |
+| `sysparm_exclude_reference_link` | Skip ref links | `true` (set on nearly every bulk read) |
+| `sysparm_offset` | Pagination offset | `100` (see Pagination below) |
+| `sysparm_no_count` | Skip the total-count sub-query | `true` (saves a round-trip on search) |
+
+`sysparm_display_value` has two useful values, and they are not interchangeable:
+
+| Value | Returns | Use for |
+|-------|---------|---------|
+| `all` | `{ value, display_value }` objects | Anything needing both raw and readable values |
+| `true` | display strings directly | Journal text diffing, where nested objects are just noise |
 
 ### Query string syntax
 
@@ -78,8 +142,9 @@ var API_BASE = location.origin;
 function snGet(table, query, fields, limit) {
     var params = {
         sysparm_query: query,
-        sysparm_limit: String(limit || 10),
-        sysparm_display_value: 'all'
+        sysparm_limit: String(limit || 50),
+        sysparm_display_value: 'all',
+        sysparm_exclude_reference_link: 'true'
     };
     if (fields && fields.length) params.sysparm_fields = fields.join(',');
     var headers = { Accept: 'application/json' };
@@ -97,6 +162,64 @@ function snGet(table, query, fields, limit) {
     .then(function(d) { return d.result || []; });
 }
 ```
+
+### Single record by sys_id
+
+`result` is a single **object**, not an array. Forgetting this is a common
+source of `undefined` reads:
+
+```javascript
+function snGetById(table, sysId, fields) {
+    var url = API_BASE + '/api/now/table/' + table + '/' + sysId +
+        '?sysparm_fields=' + encodeURIComponent(fields.join(','));
+    var headers = { Accept: 'application/json' };
+    var token = getToken();
+    if (token) headers['X-UserToken'] = token;
+    return fetch(url, { credentials: 'include', headers: headers })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { return d.result || null; });
+}
+```
+
+### Pagination
+
+ServiceNow caps `sysparm_limit` per request (commonly 1000). To retrieve more,
+page with `sysparm_offset` until a short page comes back or you hit a safety cap:
+
+```javascript
+function snAll(table, query, fields, maxTotal) {
+    maxTotal = maxTotal || 5000;
+    var page = 1000, all = [];
+    function grab(offset) {
+        var params = {
+            sysparm_query: query,
+            sysparm_limit: String(page),
+            sysparm_offset: String(offset),
+            sysparm_display_value: 'all',
+            sysparm_exclude_reference_link: 'true'
+        };
+        if (fields && fields.length) params.sysparm_fields = fields.join(',');
+        var headers = { Accept: 'application/json' };
+        var token = getToken();
+        if (token) headers['X-UserToken'] = token;
+        return fetch(
+            API_BASE + '/api/now/table/' + table + '?' + new URLSearchParams(params),
+            { credentials: 'include', headers: headers }
+        )
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var rows = d.result || [];
+            all = all.concat(rows);
+            if (rows.length === page && all.length < maxTotal) return grab(offset + page);
+            return all;
+        });
+    }
+    return grab(0);
+}
+```
+
+Needed for things like 30-day closed-ticket history across a whole team, which
+easily exceeds one page.
 
 ## Table API -- Update (PATCH)
 
@@ -170,15 +293,63 @@ function orderCatalogItem(catalogItemId, variables) {
 }
 ```
 
-The response contains `result.request_number` (REQ number) and
-`result.request_id` (REQ sys_id). To find the RITM and SCTASK:
+The response contains `result.request_number` (the REQ number) and
+**`result.sys_id`** (the REQ sys_id). There is no `result.request_id` — reading
+that gives `undefined` and every downstream child lookup silently returns
+nothing.
 
 ```javascript
-// Find RITM under the request
-snGet('sc_req_item', 'request=' + reqSysId, ['number', 'sys_id'], 1);
+orderCatalogItem(itemId, variables).then(function(d) {
+    var res = d.result || {};
+    var reqNumber = res.request_number;   // 'REQ0012345'
+    var reqSysId  = res.sys_id;           // sc_request sys_id
+
+    // Find RITM under the request
+    return snGet('sc_req_item', 'request=' + reqSysId, ['number', 'sys_id'], 10);
+});
 
 // Find SCTASK under the RITM
 snGet('sc_task', 'request_item=' + ritmSysId, ['number', 'sys_id'], 1);
+```
+
+Real catalog items usually need many variables, not one or two. Send whatever
+the item defines (`requested_for`, `opened_by`, `on_behalf_of`, `employee_id`,
+`business_service`, `assignment_group_ref`, and so on) — a missing required
+variable fails the order rather than defaulting.
+
+### Parse the error envelope on failures
+
+Both `order_now` and PATCH return a JSON error body worth surfacing. Throwing on
+status alone hides the reason:
+
+```javascript
+.then(function(r) {
+    return r.text().then(function(text) {
+        var json = null;
+        try { json = JSON.parse(text); } catch (e) {}
+        if (!r.ok) {
+            var msg = '';
+            if (json && json.error) {
+                msg = (json.error.message || '')
+                    + (json.error.detail ? ' / ' + json.error.detail : '');
+            } else {
+                msg = text.slice(0, 200);
+            }
+            throw Object.assign(new Error('HTTP ' + r.status + (msg ? ': ' + msg : '')),
+                { status: r.status });
+        }
+        return json;
+    });
+})
+```
+
+Give bulk write tools a timeout too, so one hung request cannot stall a queue:
+
+```javascript
+var ctrl = new AbortController();
+var timer = setTimeout(function() { ctrl.abort(); }, 20000);
+fetch(url, { signal: ctrl.signal, /* ... */ })
+    .finally(function() { clearTimeout(timer); });
 ```
 
 ## Attachment API
@@ -259,6 +430,75 @@ snGet('sys_user', 'sys_id=javascript:gs.getUserID()',
 Use `current_user` only when you need session extras such as `user_initials`
 or the role list.
 
+## Stats API -- Aggregate Counts
+
+```
+GET /api/now/stats/{table}?sysparm_count=true&sysparm_group_by={field}&sysparm_query={query}
+```
+
+Far cheaper than fetching rows when you only need counts. One request instead of
+paging thousands of records:
+
+```javascript
+function snStats(table, query, groupBy) {
+    var params = {
+        sysparm_count: 'true',
+        sysparm_group_by: groupBy,
+        sysparm_query: query
+    };
+    var headers = { Accept: 'application/json' };
+    var token = getToken();
+    if (token) headers['X-UserToken'] = token;
+    return fetch(
+        API_BASE + '/api/now/stats/' + table + '?' + new URLSearchParams(params),
+        { credentials: 'include', headers: headers }
+    )
+    .then(function(r) {
+        if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { status: r.status });
+        return r.json();
+    })
+    .then(function(d) { return d.result || []; });
+}
+
+// Count open incidents per assignee
+snStats('incident', 'active=true^assigned_toISNOTEMPTY', 'assigned_to');
+```
+
+Each result element carries the group-by value plus a `stats.count`. Use this
+before reaching for client-side counting — it costs one request against your
+hourly budget instead of many.
+
+## Presence API
+
+```
+GET /api/now/ui/presence
+```
+
+Returns who is currently active. Useful for showing online/idle/offline state
+without querying user records:
+
+```javascript
+function pollPresence() {
+    var headers = { Accept: 'application/json' };
+    var token = getToken();
+    if (token) headers['X-UserToken'] = token;
+    return fetch(API_BASE + '/api/now/ui/presence',
+        { credentials: 'include', headers: headers })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        var map = {};
+        (d.result || []).forEach(function(u) {
+            map[u.user] = u.last_on;   // u.user = sys_id, u.last_on = last activity
+        });
+        return map;
+    });
+}
+```
+
+No request body. Treat a user absent from the list (or last seen 30+ minutes ago)
+as offline, and give recently-seen users an idle grace window rather than
+flipping them straight to offline.
+
 ## Ticket Number Resolution
 
 Map a ticket number (e.g. INC0060123) to its table and sys_id:
@@ -292,16 +532,32 @@ function resolveRecord(number) {
 
 ## Caller Resolution
 
-SOW records have different fields for the caller depending on table:
+The field holding the end user differs per table. There is no single default that
+works — see the caller-field table in `gotchas.md` for the full mapping and the
+reasoning:
 
 ```javascript
+var CALLER_FIELDS = {
+    interaction: 'opened_for',      // IMS customer
+    incident:    'caller_id',
+    sc_req_item: 'requested_for',   // RITM beneficiary
+    sc_request:  'requested_for',
+    sc_task:     'opened_by',       // SCTASK has no caller field
+    change_request: 'requested_by'
+};
+
+function callerField(table) {
+    return CALLER_FIELDS[table] || 'caller_id';
+}
+
 function getCallerId(table, sysId) {
-    var field = (table === 'interaction') ? 'opened_for' : 'caller_id';
-    return snGet(table, 'sys_id=' + sysId, ['sys_id', field], 1)
+    var field = callerField(table);
+    return snGet(table, 'sys_id=' + sysId, ['sys_id', field, 'opened_by'], 1)
         .then(function(rows) {
             if (!rows.length) return null;
-            var val = rows[0][field];
-            val = (val && typeof val === 'object') ? (val.value || '') : (val || '');
+            // Fall back to opened_by: the primary field is often empty on
+            // records raised on someone else's behalf.
+            var val = rv(rows[0][field]) || rv(rows[0].opened_by);
             return /^[0-9a-f]{32}$/i.test(val) ? val : null;
         });
 }
@@ -309,30 +565,38 @@ function getCallerId(table, sysId) {
 
 ## Rate Limit Budget Tracker
 
-Track your own usage client-side since the server doesn't send remaining count:
+There is no `x-ratelimit-remaining` header, so a shared client-side counter is the
+only way several tools on one page can avoid starving each other.
+
+The budget and the fetch hook must live in **one** module. The hook is what
+increments the counter; a tracker whose `get()` increments separately will
+double-count, and one where neither increments stays at zero forever.
 
 ```javascript
-var SOWAPI = (function() {
+var SOWAPI = window.__SOWAPI || (window.__SOWAPI = (function() {
     var CACHE_KEY = 'sow_api_cache_v1';
     var BUDGET_KEY = 'sow_api_budget_v1';
     var TTL = 600000;       // 10 min cache
-    var MAX_ENTRIES = 60;
-    var RESERVE = 10;       // stop short of the cap
+    var MAX_ENTRIES = 60;   // localStorage is not infinite
+    var RESERVE = 10;       // stop short of the cap, other tools need room
     var inflight = {};
+    var OURS = false;       // set immediately before our own fetch calls
 
     function lsGet(k, d) {
-        try { return JSON.parse(localStorage.getItem(k)) || d; }
-        catch(e) { return d; }
+        try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }
+        catch (e) { return d; }
     }
     function lsSet(k, v) {
-        try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {}
+        try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
     }
 
+    // Budget resets on the clock hour. Note this uses the *client* hour, which
+    // can drift from the server's reset boundary — keep RESERVE for that.
     function budget() {
         var b = lsGet(BUDGET_KEY, null);
-        var window = Math.floor(Date.now() / 3600000);
-        if (!b || b.w !== window) {
-            b = { w: window, n: 0, limit: 100, until: 0, strikes: 0 };
+        var hourWindow = Math.floor(Date.now() / 3600000);
+        if (!b || b.w !== hourWindow) {
+            b = { w: hourWindow, n: 0, limit: 100, until: 0, strikes: 0 };
             lsSet(BUDGET_KEY, b);
         }
         return b;
@@ -355,8 +619,50 @@ var SOWAPI = (function() {
         lsSet(CACHE_KEY, c);
     }
 
+    // Records the outcome of one Table API response.
+    // `ours` = issued by this toolkit. `governed` = server says it counts.
+    function note(r, ours) {
+        var b = budget();
+        var lim = parseInt(r.headers.get('x-ratelimit-limit') || '', 10);
+        var rst = parseInt(r.headers.get('x-ratelimit-reset') || '', 10);
+        var governed = lim > 0 || r.status === 429;
+
+        if (ours || governed) b.n++;
+        if (lim > 0) b.limit = lim;
+        if (rst > 0) b.reset = rst * 1000;
+
+        if (r.status === 429) {
+            var ra = parseInt(r.headers.get('retry-after') || '', 10);
+            b.strikes = Math.min((b.strikes || 0) + 1, 6);
+            b.until = Date.now() + (ra > 0 ? ra * 1000
+                : Math.min(60000, 3000 * Math.pow(2, b.strikes - 1)));
+        } else {
+            b.strikes = 0;
+            b.until = 0;
+        }
+        lsSet(BUDGET_KEY, b);
+    }
+
+    (function hookFetch() {
+        if (window.__sowFetchHooked) return;
+        window.__sowFetchHooked = true;
+        var orig = window.fetch;
+        if (typeof orig !== 'function') return;
+        window.fetch = function(input) {
+            var url = '';
+            try { url = (typeof input === 'string') ? input : (input && input.url) || ''; }
+            catch (e) {}
+            if (url.indexOf('/api/now/table/') < 0) return orig.apply(this, arguments);
+            var ours = OURS; OURS = false;   // consume the flag
+            return orig.apply(this, arguments).then(function(r) {
+                try { note(r, ours); } catch (e) {}
+                return r;
+            });
+        };
+    })();
+
     function get(table, query, fields, limit) {
-        var key = table + '|' + query + '|' + (fields || []).join(',') + '|' + (limit || 10);
+        var key = table + '|' + query + '|' + (fields || []).join(',') + '|' + (limit || 50);
         var hit = cacheGet(key);
         if (hit !== undefined) return Promise.resolve(hit);
         if (inflight[key]) return inflight[key];
@@ -365,49 +671,27 @@ var SOWAPI = (function() {
         if (Date.now() < b.until)
             return Promise.reject(new Error('Paused after rate limit'));
         if (b.n >= b.limit - RESERVE)
-            return Promise.reject(new Error('Budget exhausted, resets on the hour'));
+            return Promise.reject(new Error('Request budget reached, resets on the hour'));
 
+        OURS = true;   // the fetch hook charges this one to us
         var req = snGet(table, query, fields, limit)
             .then(function(rows) { cacheSet(key, rows); return rows; });
         inflight[key] = req;
-        req.finally(function() { delete inflight[key]; });
+        req.catch(function() {}).then(function() { delete inflight[key]; });
         return req;
     }
 
     return { get: get, budget: budget };
-})();
+})());
 ```
 
-### Fetch Observer
+### Why the hook charges selectively
 
-Hook `window.fetch` to count every Table API call on the page, including ones
-made by the workspace itself:
-
-```javascript
-(function hookFetch() {
-    if (window.__sowFetchHooked) return;
-    window.__sowFetchHooked = true;
-    var orig = window.fetch;
-    window.fetch = function(input) {
-        var url = '';
-        try { url = (typeof input === 'string') ? input : (input && input.url) || ''; }
-        catch(e) {}
-        if (url.indexOf('/api/now/table/') < 0) return orig.apply(this, arguments);
-        // Count this request against the budget
-        var b = budget();
-        b.n++;
-        lsSet(BUDGET_KEY, b);
-        return orig.apply(this, arguments).then(function(r) {
-            if (r.status === 429) {
-                var retryAfter = parseInt(r.headers.get('retry-after') || '', 10);
-                b.until = Date.now() + (retryAfter > 0 ? retryAfter * 1000 : 60000);
-                lsSet(BUDGET_KEY, b);
-            }
-            return r;
-        });
-    };
-})();
-```
+ServiceNow only returns `x-ratelimit-*` headers on responses that actually count
+against a rule, and header presence proved unreliable as a test on its own. So
+charge everything the toolkit issues (`ours`) plus anything the server explicitly
+flags (`governed`). Counting every Table API call on the page instead — including
+the workspace's own — drains the budget with traffic you do not control.
 
 ## Common Tables
 
