@@ -131,8 +131,8 @@
         <li class="mod-row">
             <span class="mod-key">user</span>
             <div>
-                <div class="mod-name">Current user API</div>
-                <div class="mod-desc">Calls /api/now/ui/user/current_user then loads sys_user with dv() helpers.</div>
+                <div class="mod-name">Current user resolution</div>
+                <div class="mod-desc">sys_user query via javascript:gs.getUserID(), falling back to current_user (user_sys_id).</div>
             </div>
         </li>
         <li class="mod-row">
@@ -187,6 +187,12 @@
                 return f.display_value || '';
             var s = String(f);
             return (s === 'undefined' || s === 'null') ? '' : s;
+        }
+
+        function rv(f) {
+            if (f == null) return '';
+            if (typeof f === 'object') return (f.value || f.display_value || '');
+            return String(f);
         }
 
         function toast(message, color, durationMs) {
@@ -296,27 +302,37 @@
             return;
         }
 
-        fetch(location.origin + '/api/now/ui/user/current_user', {
-            headers: { Accept: 'application/json', 'X-UserToken': token },
-            credentials: 'include'
-        })
-        .then(function(r) {
-            if (!r.ok) throw new Error('current_user HTTP ' + r.status);
-            return r.json();
-        })
-        .then(function(d) {
-            var mySysId = d.result && d.result.sys_id;
-            if (!mySysId) throw new Error('No sys_id in current_user response');
-            tk.sysId = mySysId;
-            return snGet('sys_user', 'sys_id=' + mySysId,
-                ['sys_id', 'name', 'user_name', 'email', 'title'], 1);
+        // gs.getUserID() resolves server-side, so one Table API call gets the whole
+        // record without depending on the current_user response shape.
+        snGet('sys_user', 'sys_id=javascript:gs.getUserID()',
+            ['sys_id', 'name', 'user_name', 'email', 'title'], 1)
+        .then(function(rows) {
+            if (rows.length) return rows;
+            // Fallback: session endpoint returns user_sys_id, not sys_id.
+            return fetch(location.origin + '/api/now/ui/user/current_user', {
+                headers: { Accept: 'application/json', 'X-UserToken': token },
+                credentials: 'include'
+            })
+            .then(function(r) {
+                if (!r.ok) throw new Error('current_user HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(d) {
+                var res = d.result || {};
+                var mySysId = res.user_sys_id || res.sys_id || res.sysId;
+                if (!mySysId) throw new Error('Could not resolve current user sys_id');
+                return snGet('sys_user', 'sys_id=' + mySysId,
+                    ['sys_id', 'name', 'user_name', 'email', 'title'], 1);
+            });
         })
         .then(function(rows) {
-            var u = rows[0] || {};
+            var u = rows[0];
+            if (!u) throw new Error('sys_user returned no rows for the current session');
             var name = dv(u.name) || 'Unknown';
             var userName = dv(u.user_name) || '—';
             var email = dv(u.email) || '—';
             var title = dv(u.title) || '—';
+            tk.sysId = rv(u.sys_id);
             var tokenPreview = token.slice(0, 8) + '…' + token.slice(-4);
 
             body.innerHTML = '';
@@ -325,7 +341,7 @@
                 ['User name', userName],
                 ['Email', email],
                 ['Title', title],
-                ['sys_id', tk.sysId],
+                ['sys_id', tk.sysId || '—'],
                 ['Token', tokenPreview]
             ];
             rowsHtml.forEach(function(pair) {

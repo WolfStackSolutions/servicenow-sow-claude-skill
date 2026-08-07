@@ -217,21 +217,47 @@ function uploadFile(file, fileName, table, sysId) {
 GET /api/now/ui/user/current_user
 ```
 
-Returns the sys_id of the logged-in user. Then fetch their full record:
+The sys_id comes back as **`user_sys_id`**, not `sys_id`. Reading `result.sys_id`
+returns `undefined` on every instance:
+
+```json
+{
+    "result": {
+        "user_sys_id": "62826bf03710200044e0bfc8bcbe5df1",
+        "user_name": "abel.tuter",
+        "user_display_name": "Abel Tuter",
+        "user_initials": "AT"
+    }
+}
+```
 
 ```javascript
-fetch('/api/now/ui/user/current_user', {
+fetch(API_BASE + '/api/now/ui/user/current_user', {
     headers: { Accept: 'application/json', 'X-UserToken': getToken() },
     credentials: 'include'
 })
 .then(function(r) { return r.json(); })
 .then(function(d) {
-    var mySysId = d.result.sys_id;
-    // Now fetch full user record
+    var res = d.result || {};
+    var mySysId = res.user_sys_id || res.sys_id || res.sysId;
     return snGet('sys_user', 'sys_id=' + mySysId,
         ['sys_id', 'name', 'first_name', 'employee_number', 'user_name'], 1);
 });
 ```
+
+### Preferred: skip the endpoint entirely
+
+`javascript:gs.getUserID()` resolves server-side inside a Table API query, so one
+call gets the full user record and there is no response-shape dependency:
+
+```javascript
+snGet('sys_user', 'sys_id=javascript:gs.getUserID()',
+    ['sys_id', 'name', 'user_name', 'email', 'title'], 1)
+.then(function(rows) { var me = rows[0]; });
+```
+
+Use `current_user` only when you need session extras such as `user_initials`
+or the role list.
 
 ## Ticket Number Resolution
 
