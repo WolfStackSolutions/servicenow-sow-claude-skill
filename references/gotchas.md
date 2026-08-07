@@ -7,12 +7,14 @@ anything -- each item here has caused real bugs.
 
 ### Always use `sysparm_display_value=all`
 
-Without this, reference fields return raw sys_ids (32-char hex) instead of
-human-readable names. The `all` mode returns both:
+Without `=all`, you do **not** get a reliable human-readable name on reference
+fields. The exact shape varies by instance:
 
 ```javascript
-// WITHOUT sysparm_display_value=all:
-{ "assignment_group": "abc123def456..." }
+// WITHOUT sysparm_display_value=all — either of these is common:
+{ "assignment_group": "abc123def456..." }                    // raw sys_id string
+{ "assignment_group": { "link": "https://…/sys_user_group/…",
+                        "value": "abc123def456..." } }       // link object, no name
 
 // WITH sysparm_display_value=all:
 { "assignment_group": {
@@ -22,19 +24,21 @@ human-readable names. The `all` mode returns both:
 }
 ```
 
-Every query in this skill uses it. Never omit it.
+Always pass `=all` and read names via `dv()`. Never assume a bare string without
+it — some instances already return objects (with `.link`) as the default.
 
 ### Always include `credentials: 'include'`
 
-Without this, the browser does not send the session cookie and every request
-returns 401. This applies to `fetch()`. For `XMLHttpRequest`, set
-`xhr.withCredentials = true`.
+Set it explicitly on every `fetch()`. Modern browsers default `credentials` to
+`'same-origin'`, so a same-host call may still send cookies if you omit the
+option — but cross-origin frames, workers, and older assumptions still 401.
+For `XMLHttpRequest`, set `xhr.withCredentials = true`.
 
 ```javascript
-// WRONG -- will 401
+// Fragile — relies on the browser default for same-origin cookies
 fetch('/api/now/table/incident', { headers: { ... } });
 
-// RIGHT
+// RIGHT — always be explicit
 fetch('/api/now/table/incident', { credentials: 'include', headers: { ... } });
 ```
 

@@ -516,7 +516,7 @@ var TABLE_MAP = {
     PRB: 'problem',
     CTASK: 'change_task',
     SCTASK: 'sc_task',
-    STASK: 'sn_si_task',
+    STASK: 'sn_si_task', // Security Incident plugin — absent on many instances (HTTP 400)
     TASK: 'task',
     IMS: 'interaction',
     KB: 'kb_knowledge'

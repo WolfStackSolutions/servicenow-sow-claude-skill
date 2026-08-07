@@ -15,9 +15,11 @@ you.
 
 ## Subscribing to Record Watchers
 
-The client is `window.g_ambClient` — not `window.amb`, and there is no
-`getClient()` step. Do not hand-build `/rw/default/...` channel paths; ask for a
-channel by table and encoded query:
+The client to use is `window.g_ambClient`. Some SOW pages also expose
+`window.amb.getClient()`, but record watchers in this skill go through
+`g_ambClient.getRecordWatcherChannel(table, query)` — there is no separate
+`getClient()` step on that path. Do not hand-build `/rw/default/...` channel
+paths; ask for a channel by table and encoded query:
 
 ```javascript
 function ambClient() {

@@ -235,17 +235,22 @@ add('auth-007', 'auth', 'current_user succeeds with credentials:include + X-User
     });
 });
 
-add('auth-008', 'auth', 'Omitting credentials causes auth failure (401)', function () {
+add('auth-008', 'auth', 'Omit credentials: may 401, or still work via same-origin cookie default', function () {
     var token = getToken();
     var headers = { Accept: 'application/json' };
     if (token) headers['X-UserToken'] = token;
     return fetch(location.origin + '/api/now/table/incident?sysparm_limit=1', {
-        // deliberately omit credentials
+        // deliberately omit credentials mode
         headers: headers
     }).then(function (r) {
         API_STATS.calls++;
-        if (r.status === 401 || r.status === 403) return pass('HTTP ' + r.status + ' without credentials');
-        if (r.ok) return warn('Request succeeded without credentials — session cookie may be sent by default for same-origin');
+        if (r.status === 401 || r.status === 403) {
+            return pass('HTTP ' + r.status + ' without credentials (strict cookie mode)');
+        }
+        if (r.ok) {
+            // fetch default credentials is 'same-origin' in modern browsers — cookies still go
+            return pass('HTTP ' + r.status + ' — browser defaulted same-origin cookies (still set credentials:include explicitly)');
+        }
         return fail('Unexpected HTTP ' + r.status);
     });
 });
@@ -324,7 +329,7 @@ add('shape-005', 'response-shape', 'sysparm_display_value=all returns {value, di
     });
 });
 
-add('shape-006', 'response-shape', 'Without display_value=all, references are raw sys_id strings', function () {
+add('shape-006', 'response-shape', 'Without display_value=all, refs lack reliable display names (shape varies)', function () {
     return tableGet('incident', {
         sysparm_limit: '1',
         sysparm_query: 'assignment_groupISNOTEMPTY',
@@ -334,8 +339,19 @@ add('shape-006', 'response-shape', 'Without display_value=all, references are ra
         var row = r.json.result[0];
         if (!row) return skip('no incident with assignment_group');
         var ag = row.assignment_group;
-        if (typeof ag === 'string' && isSysId(ag)) return pass('raw sys_id string');
-        if (ag && typeof ag === 'object') return fail('got object — display_value may be defaulting on this instance: ' + JSON.stringify(ag).slice(0, 100));
+        if (typeof ag === 'string' && isSysId(ag)) {
+            return pass('raw sys_id string (classic shape)');
+        }
+        if (ag && typeof ag === 'object') {
+            // Some instances still return {link,value} (or similar) without =all.
+            // What must NOT be relied on is a stable display_value name.
+            if (ag.display_value) {
+                return warn('object WITH display_value without =all — instance defaulting display mode: ' +
+                    JSON.stringify(ag).slice(0, 120));
+            }
+            return pass('object without display_value (e.g. link/value only) — still need =all for names: ' +
+                JSON.stringify(ag).slice(0, 100));
+        }
         if (!ag) return skip('assignment_group empty');
         return warn('unexpected type ' + typeof ag + ': ' + String(ag).slice(0, 80));
     });
@@ -683,14 +699,18 @@ add('caller-002', 'caller', 'interaction uses opened_for (not caller_id)', funct
     return tableGet('interaction', {
         sysparm_limit: '1',
         sysparm_display_value: 'all',
-        sysparm_fields: 'sys_id,opened_for,caller_id,opened_by'
+        sysparm_fields: 'sys_id,opened_for,caller_id,opened_by,number'
     }).then(function (r) {
         if (r.status === 403) return skip('interaction ACL');
         if (!r.ok) return fail('HTTP ' + r.status);
         var row = r.json.result[0];
         if (!row) return skip('no interactions');
         if (!('opened_for' in row)) return fail('opened_for missing');
-        return pass('opened_for present; caller_id=' + JSON.stringify(row.caller_id).slice(0, 40));
+        var cid = row.caller_id;
+        var cidNote = (cid === undefined || cid === null || cid === '')
+            ? 'caller_id absent/empty (expected)'
+            : 'caller_id present=' + String(JSON.stringify(cid)).slice(0, 40);
+        return pass('opened_for ok on ' + (dv(row.number) || 'row') + '; ' + cidNote);
     });
 });
 
@@ -1163,12 +1183,15 @@ add('amb-003', 'amb', 'g_ambClient.getConnectionState reports a live-ish state',
     return warn('state=' + state + ' — not live yet');
 });
 
-add('amb-004', 'amb', 'window.amb / getClient() pattern is NOT the real API', function () {
-    var legacy = window.amb;
-    if (legacy && typeof legacy.getClient === 'function') {
-        return warn('window.amb.getClient exists — unexpected; skill correctly prefers g_ambClient');
+add('amb-004', 'amb', 'Prefer g_ambClient even if window.amb also exists', function () {
+    var hasG = !!(window.g_ambClient && typeof window.g_ambClient.getRecordWatcherChannel === 'function');
+    var legacy = !!(window.amb && typeof window.amb.getClient === 'function');
+    if (hasG && legacy) {
+        return pass('both present — use g_ambClient.getRecordWatcherChannel (not amb.getClient)');
     }
-    return pass('legacy window.amb.getClient absent (skill docs are correct)');
+    if (hasG) return pass('g_ambClient present; legacy window.amb.getClient absent');
+    if (legacy) return fail('only window.amb — skill requires g_ambClient');
+    return fail('neither API present');
 });
 
 /* ========== GENESYS ========== */

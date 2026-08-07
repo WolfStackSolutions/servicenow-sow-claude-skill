@@ -220,8 +220,8 @@ SOW's tab and screen pool sizes are configured on live component instances:
 ```javascript
 // Tab limits (on sn-canvas-tabs / sn-canvas-tabsdata)
 element.tabConfig = {
-    maxMainTabLimit: 10,      // default, can be raised
-    maxTotalSubTabLimit: 20   // sub-tabs (e.g. IMS child records)
+    maxMainTabLimit: 10,      // common default; instance may already raise this
+    maxTotalSubTabLimit: 20   // common default — live instances often use 30+
 };
 
 // Screen pool (on sn-canvas-main)
