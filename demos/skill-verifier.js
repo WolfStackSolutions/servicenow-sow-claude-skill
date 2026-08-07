@@ -914,6 +914,10 @@ PREFIX_TABLES.forEach(function (pair) {
             if (r.status === 404) return fail('404 missing');
             if (r.status === 403) return warn('403 ACL — table exists but blocked');
             if (r.ok) return pass('200');
+            // sn_si_task often 400 when Security Incident plugin is not installed
+            if (table === 'sn_si_task' && (r.status === 400 || r.status === 404)) {
+                return warn('HTTP ' + r.status + ' — Security Incident plugin likely absent (optional table)');
+            }
             return warn('HTTP ' + r.status);
         });
     });
@@ -1632,7 +1636,7 @@ add('sel-015', 'selectors', 'now-record-common-uiactionbar on record pages (soft
     return warn('not found on this record page');
 });
 
-add('sel-016', 'selectors', 'tabConfig maxMainTabLimit / maxTotalSubTabLimit (soft defaults)', function () {
+add('sel-016', 'selectors', 'tabConfig maxMainTabLimit / maxTotalSubTabLimit present (soft)', function () {
     var found = null;
     walkShadows(document, function (el) {
         if (found) return;
@@ -1650,8 +1654,10 @@ add('sel-016', 'selectors', 'tabConfig maxMainTabLimit / maxTotalSubTabLimit (so
     if (!found) return warn('no tabConfig found yet');
     var mm = found.maxMainTabLimit, mt = found.maxTotalSubTabLimit;
     var msg = 'maxMainTabLimit=' + mm + ' maxTotalSubTabLimit=' + mt;
-    if (mm === 10 && mt === 20) return pass(msg + ' (docs defaults)');
-    return warn(msg + ' (docs cite ≈10/≈20 — instance may differ)');
+    if (typeof mm === 'number' && typeof mt === 'number') {
+        return pass(msg + ' (common stock defaults ~10/~20; live instances often raise sub-tab limit)');
+    }
+    return warn(msg + ' — unexpected types');
 });
 
 add('sel-017', 'selectors', 'mainConfig maxActivePageCount / maxCachedPageCount (soft)', function () {
