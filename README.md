@@ -239,6 +239,8 @@ bookmarks bar, then click it while logged into SOW:
 
 - **Who Am I** — token grab + `current_user` / `sys_user`
 - **My Open Incidents** — Table API list with `dv()` / `rv()`
+- **Alert Suppressor** — block `now-alert` banners (dispatch + DOM insert hooks)
+  and log the messages in a FAB panel
 - **Skill Verifier** — ~168 read-only probes against the live page (GET only;
   won't touch tickets; stops on 429)
 
