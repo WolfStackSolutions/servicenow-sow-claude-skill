@@ -6,3 +6,7 @@ text.txt
 realcode/
 dist/
 *.skill.zip
+
+# Claude.ai upload zip (checked in for easy download)
+!packaged/
+!packaged/**

@@ -176,8 +176,8 @@ Chrome happily carries a ~490KB tool this way. See
 Yes — the web UI wants a **ZIP**. Easiest path: grab the release asset (no clone).
 
 1. Download
-   [`servicenow-sow-bookmarklet.zip`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/releases/download/v1.0.0/servicenow-sow-bookmarklet.zip)
-   from the [v1.0.0 release](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/releases/tag/v1.0.0).
+   [`servicenow-sow-bookmarklet.zip`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/raw/main/packaged/servicenow-sow-bookmarklet.zip)
+   (also tagged [`v1.0.0`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/releases/tag/v1.0.0) once a Release is attached).
 2. In [claude.ai](https://claude.ai): **Customize → Skills → Upload skill**
    (wording may say Settings → Capabilities / Features depending on the UI).
 3. Upload the zip, then **toggle the skill ON** — upload alone doesn’t enable it.
