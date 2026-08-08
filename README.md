@@ -1,35 +1,27 @@
 <div align="center">
-  <img src="images/readmeimage.png" alt="ServiceNow SOW Bookmarklet Skill" />
+  <img src="images/readmeimage.png" alt="servicenow sow bookmarklet skill" />
 </div>
 
 # ServiceNow SOW Bookmarklet Skill
 
-This is the stuff I wish I'd had when I started building tools on ServiceNow's
-Service Operations Workspace.
+stuff i wish existed when i first tried building tools on service operations workspace.
 
-SOW is a shadow-DOM maze. The Table API lies to you about field shapes. Journals
-return `200` with zero rows when ACL-blocked. Rate-limit headers appear on some
-calls and vanish on others. Genesys softphone events only show up if you listen
-on the right iframe with capture phase. None of that is in the docs.
+sow is a mess. shadow dom nested like 15 levels deep. the table api returns different shapes depending on the day. journals can 200 with zero rows when acl blocks you. rate limit headers show up sometimes and disappear other times. genesys only talks to you if you listen on the right iframe with capture. none of this is documented properly.
 
-**This skill is months of reverse engineering**, distilled from production
-bookmarklets that actually run on a live SOW instance — then checked again with
-a read-only verifier against that same instance. Hand it to Claude (or another
-assistant) and it can build SOW tools without redoing that archaeology.
+this skill is months of reverse engineering from tools that actually run in production, then checked again with a read-only verifier on a live sow page. drop it into claude/cursor and you don't have to rediscover all that crap yourself.
 
-## What you get
+## What's in here
 
-| Path | What it is |
-|------|------------|
-| `SKILL.md` | The skill entrypoint — delivery pattern, auth, when to load each reference |
-| `references/` | Deep docs: APIs, DOM, injection, AMB, Genesys, polling, gotchas, installer |
-| `examples/` | Small working patterns (injector, table query, mutation watcher, menu) |
-| `demos/` | Drag-to-bookmarks HTML pages, including a full read-only skill verifier |
+| path | what |
+|------|------|
+| `SKILL.md` | main skill file, when to load what |
+| `references/` | the deep stuff: apis, dom, injection, amb, genesys, polling, gotchas |
+| `examples/` | small working bits |
+| `demos/` | drag-to-bookmarks html pages you can try |
 
-## The gotchas that burn people
+## The stuff that burns you
 
-CSRF isn't a mystery once you've seen it, but the fallback chain matters when
-your code ends up framed:
+csrf is fine once you know the chain. matters more when you're framed:
 
 ```javascript
 function getToken() {
@@ -46,10 +38,7 @@ function getToken() {
 }
 ```
 
-Always send `credentials: 'include'` and `X-UserToken`. Always ask for
-`sysparm_display_value=all` if you want human-readable names — without it,
-references might be a bare sys_id **or** a `{link, value}` object depending on
-the instance. Never assume a string:
+always do `credentials: 'include'` + `X-UserToken`. always use `sysparm_display_value=all` if you want names. without it you might get a raw sys_id string *or* a `{link, value}` object. don't assume:
 
 ```javascript
 function snGet(table, query, fields, limit) {
@@ -77,7 +66,6 @@ function snGet(table, query, fields, limit) {
     .then(function (d) { return d.result || []; });
 }
 
-// Field helpers — refs are objects under display_value=all
 function dv(f) {
     if (f == null) return '';
     if (typeof f === 'object' && f.display_value !== undefined) return f.display_value || '';
@@ -91,26 +79,24 @@ function rv(f) {
 }
 ```
 
-Caller fields are per-table. There is no universal `caller_id`:
+caller fields are different per table. there is no one `caller_id`:
 
 ```javascript
 var CALLER_FIELD = {
     incident: 'caller_id',
-    interaction: 'opened_for',   // IMS — not caller_id
+    interaction: 'opened_for',   // ims, not caller_id
     sc_req_item: 'requested_for',
     sc_request: 'requested_for',
     change_request: 'requested_by',
-    sc_task: 'opened_by'         // no real "caller"; follow request_item up
+    sc_task: 'opened_by'         // follow request_item up for the ritm
 };
 ```
 
-And `current_user` returns `user_sys_id`, not `sys_id`. That one alone wasted
-an afternoon.
+also `current_user` gives you `user_sys_id`, not `sys_id`. that one cost me an afternoon.
 
-## Finding anything in SOW's DOM
+## Finding stuff in the DOM
 
-Stable selectors beat hardcoded macroponent hashes. Walk shadows until you find
-the host that owns the node you care about:
+use stable selectors, not macroponent hash ids. walk shadows:
 
 ```javascript
 function findHostWith(selector) {
@@ -130,34 +116,30 @@ function findHostWith(selector) {
     return null;
 }
 
-// Header chrome lives in a shadow root
 var headerHost = findHostWith('.polaris-header-controls');
 ```
 
-Real-time updates go through `window.g_ambClient` — not `window.amb.getClient()`,
-even when both exist on the page:
+realtime is `window.g_ambClient`, not `window.amb.getClient()`, even if both are sitting there:
 
 ```javascript
 var c = window.g_ambClient;
 if (c && typeof c.getRecordWatcherChannel === 'function') {
     var ch = c.getRecordWatcherChannel('incident', 'sys_id=' + sysId);
     var sub = ch.subscribe(function () {
-        // treat as a kick, then re-fetch — don't trust the push payload as truth
+        // just a kick, re-fetch, don't trust the push body
         pollDelta();
     });
 }
 ```
 
-## Delivery: bookmarklet + installer HTML
+## Shipping it
 
-SOW's CSP blocks external scripts, so the whole tool has to ride in a
-`javascript:` bookmark. The usual pattern is an HTML page that builds the
-href for you:
+sow's csp blocks external scripts so the whole tool lives in a `javascript:` bookmark. usual pattern is an html page that builds the href:
 
 ```javascript
 var toolkitCode = function () {
     'use strict';
-    // … entire tool …
+    // ... entire tool ...
 };
 
 var code = toolkitCode.toString();
@@ -166,24 +148,20 @@ var href = 'javascript:void((function(){' + encodeURIComponent(body) + '})())';
 document.getElementById('install-link').href = href;
 ```
 
-Chrome happily carries a ~490KB tool this way. See
-`references/installer-template.md` for the full installer page.
+chrome is fine with ~490kb this way. full installer template is in `references/installer-template.md`.
 
 ## Install
 
-### Claude.ai (web / desktop GUI)
+### Claude.ai
 
-Yes — the web UI wants a **ZIP**. Easiest path: grab the release asset (no clone).
+needs a zip. easiest:
 
-1. Download
-   [`servicenow-sow-bookmarklet.zip`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/raw/main/packaged/servicenow-sow-bookmarklet.zip)
-   (also tagged [`v1.0.0`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/releases/tag/v1.0.0) once a Release is attached).
-2. In [claude.ai](https://claude.ai): **Customize → Skills → Upload skill**
-   (wording may say Settings → Capabilities / Features depending on the UI).
-3. Upload the zip, then **toggle the skill ON** — upload alone doesn’t enable it.
-4. Needs a paid plan with **code execution** enabled for custom skills.
+1. grab [`servicenow-sow-bookmarklet.zip`](https://github.com/WolfStackSolutions/servicenow-sow-claude-skill/raw/main/packaged/servicenow-sow-bookmarklet.zip)
+2. claude.ai → customize → skills → upload skill
+3. turn the toggle **on** after upload (upload alone does nothing)
+4. paid plan + code execution on
 
-The zip is folder-wrapped on purpose:
+zip has to be folder-wrapped like this:
 
 ```
 servicenow-sow-bookmarklet.zip
@@ -194,68 +172,57 @@ servicenow-sow-bookmarklet.zip
     └── examples/
 ```
 
-Don’t re-zip bare files at the root — Claude won’t find `SKILL.md`.
+if you zip the files flat, claude won't find `SKILL.md`.
 
-To rebuild locally:
+rebuild yourself with:
 
 ```bash
 ./scripts/pack-for-claude.sh
-# → dist/servicenow-sow-bookmarklet.zip
 ```
 
-Demos and the README banner are left out of the zip — Claude only needs the
-skill + references + examples.
+demos aren't in the zip on purpose. claude only needs the skill + references + examples.
 
-### Claude Code / Cursor (filesystem)
-
-Clone and copy into the skills folder:
+### Claude Code / Cursor
 
 ```bash
 git clone https://github.com/WolfStackSolutions/servicenow-sow-claude-skill.git
 ```
 
-**Claude Code**
+claude code:
 
 ```bash
 cp -r servicenow-sow-claude-skill ~/.claude/skills/servicenow-sow-bookmarklet
 ```
 
-**Cursor**
+cursor:
 
 ```bash
 cp -r servicenow-sow-claude-skill ~/.cursor/skills/servicenow-sow-bookmarklet
 ```
 
-(Or open this repo and work from it directly — same files.)
+or just open the repo and work from it.
 
-> There isn’t an `npx` installer yet. That would be a tiny npm package that just
-> copies these files into the skills folder. Easy to add later; clone/copy (or
-> the Claude.ai zip) is the real path today.
+no npx thing yet. clone/copy or the zip is the path.
 
-## Try the demos
+## Demos
 
-Open anything under `demos/` in a normal browser tab, drag the button to your
-bookmarks bar, then click it while logged into SOW:
+open anything in `demos/` in a browser, drag the button to bookmarks, click it on sow:
 
-- **Who Am I** — token grab + `current_user` / `sys_user`
-- **My Open Incidents** — Table API list with `dv()` / `rv()`
-- **Alert Suppressor** — block `now-alert` banners (dispatch + DOM insert hooks)
-  and log the messages in a FAB panel
-- **Skill Verifier** — ~168 read-only probes against the live page (GET only;
-  won't touch tickets; stops on 429)
+- `who-am-i.html` - token + current user
+- `my-open-incidents.html` - table api list
+- `alert-suppressor.html` - kills `now-alert` banners, logs them in a fab
+- `skill-verifier.html` - ~168 read-only checks against the live page (get only, won't touch tickets, stops on 429)
 
-## How to use it with an assistant
+## Talking to the assistant
 
-Once the skill is installed, talk normally:
+once it's installed just ask normal stuff like:
 
-- "Build a bookmarklet that shows the caller's recent tickets on the contact card"
-- "Watch work notes and toast when someone else comments"
-- "Hook the Genesys softphone and show a call timer in the header"
+- build a bookmarklet that shows the caller's recent tickets on the contact card
+- watch work notes and toast when someone else comments
+- hook genesys and put a call timer in the header
 
-The skill tells the model how to auth, which endpoints to hit, where to inject,
-and how to ship the result as a bookmarklet — including the landmines.
+it'll know how to auth, which endpoints to hit, where to inject, and how to ship it.
 
 ## License
 
-MIT — use it, fork it, ship tools with it. If it saves you a few months of
-headaches, that's the point.
+mit. use it, fork it, ship stuff with it. if it saves you a few months of pain that's the whole point.
