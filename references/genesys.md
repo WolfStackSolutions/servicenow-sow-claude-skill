@@ -118,12 +118,12 @@ All call events use `msg.type === 'Interaction'` with different categories:
     data: {
         state: 'ALERTING',
         id: 'conversation-uuid',
-        displayAddress: '+61312345678',
-        ani: '+61312345678',
+        displayAddress: '+15551234567',
+        ani: '+15551234567',
         name: 'Caller Name',
         queueName: 'Service Desk',
         direction: 'inbound',
-        calledNumber: '+61398765432',
+        calledNumber: '+15559876543',
         totalIvrDurationSeconds: 45
     }
 }
@@ -139,7 +139,7 @@ All call events use `msg.type === 'Interaction'` with different categories:
             isConnected: true,
             id: 'conversation-uuid',
             connectedTime: '2025-01-15T09:30:00.000Z',
-            displayAddress: '+61312345678',
+            displayAddress: '+15551234567',
             queueName: 'Service Desk',
             direction: 'inbound',
             totalIvrDurationSeconds: 45
