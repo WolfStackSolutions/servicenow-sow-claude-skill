@@ -8,7 +8,7 @@ stuff i wish existed when i first tried building tools on service operations wor
 
 sow is a mess. shadow dom nested like 15 levels deep. the table api returns different shapes depending on the day. journals can 200 with zero rows when acl blocks you. rate limit headers show up sometimes and disappear other times. genesys only talks to you if you listen on the right iframe with capture. none of this is documented properly.
 
-this skill is months of reverse engineering from tools that actually run in production, then checked again with a read-only verifier on a live sow page. drop it into claude/cursor and you don't have to rediscover all that crap yourself.
+this skill is months of reverse engineering from tools that actually run in production. drop it into claude/cursor and you don't have to rediscover all that crap yourself.
 
 ## What's in here
 
