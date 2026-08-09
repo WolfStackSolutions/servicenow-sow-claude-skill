@@ -1,7 +1,6 @@
 # UI Patterns for SOW Tools
 
-SOW tools inject UI directly into the page DOM. These patterns are proven in
-production across multiple tools.
+These patterns are proven in production.
 
 ## Escaping: read this before any `innerHTML`
 
