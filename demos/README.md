@@ -8,7 +8,6 @@ Service Operations Workspace page (`/now/sow/...`).
 |------|----------------|
 | `sow-skill-demo.html` | Unified 7-tool toolkit with toggle menu: alert suppressor, ticket copy, tab counter, tab limit extender, quick associate, who am i, my open incidents |
 | `skill-verifier.html` | Full skill claim audit (~168 read-only probes) |
-| `skill-verifier.js` | Source embedded by the verifier installer |
 
 ---
 
