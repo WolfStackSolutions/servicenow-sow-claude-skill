@@ -21,7 +21,7 @@ All-in-one bookmarklet with 7 toggleable tools and a draggable menu.
 3. Click it on `/now/sow/`. The toggle menu appears.
 4. Click the bookmarklet again to show/hide the menu.
 
-![Toggle menu](images/maindemo.png)
+![Toggle menu](../images/maindemo.png)
 
 ### Alert Suppressor
 
@@ -36,12 +36,12 @@ a scrollable log of every suppressed message with timestamps.
   never stay in the DOM (hide + remove on the next microtick) -- no timer, no
   dismiss animation, no focus steal.
 
-![Alert Suppressor panel and FAB](images/alertsup.png)
+![Alert Suppressor panel and FAB](../images/alertsup.png)
 
 The shield FAB badge increments on every block. Open the panel to read the
 suppressed messages. This is the kind of banner it catches:
 
-![SOW notification banner](images/template.png)
+![SOW notification banner](../images/template.png)
 
 ### Ticket Copy
 
@@ -49,7 +49,7 @@ Adds a clipboard icon next to every ticket tab label. Shows on hover, copies
 the ticket number on click with an opacity flash to confirm. Walks shadow roots
 with MutationObservers and periodic re-scans to catch lazily mounted tabs.
 
-![Copy button on a ticket tab](images/ticketcopy.png)
+![Copy button on a ticket tab](../images/ticketcopy.png)
 
 ### Tab Counter
 
@@ -75,7 +75,7 @@ full record tree before POSTing to `interaction_related_record`. Matches native
 button styles by reading computed styles from the existing action bar buttons.
 Auto-removes when you navigate away from the IMS record.
 
-![Quick Associate on the IMS action bar](images/associaterecord.png)
+![Quick Associate on the IMS action bar](../images/associaterecord.png)
 
 ### Who Am I
 
